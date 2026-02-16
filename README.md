@@ -12,18 +12,18 @@ This proxy works around that limitation. It spawns the real Claude Code CLI as a
 
 ## Approach Comparison
 
-There are two main ways to turn a Claude Max subscription into an API. This project uses the CLI approach, based on [Benson Sun's architecture](https://x.com/BensonTWN/status/2022718855177736395).
+Both approaches below route requests through the Claude Code CLI to avoid session token risks. [Benson Sun's original design](https://x.com/BensonTWN/status/2022718855177736395) uses a pseudo-TTY to emulate a real terminal. This project uses `child_process.spawn()` with pipe I/O and the CLI's `--output-format stream-json` flag instead.
 
-|  | Session Token Proxy | CLI Proxy (this project) |
-|--|---------------------|--------------------------|
-| **How it works** | Extract `sessionKey` cookie from browser, reverse-proxy mimics browser traffic to `claude.ai` | Spawn Claude Code CLI as subprocess, relay via OpenAI-compatible HTTP API |
-| **Setup** | Copy cookie from browser, run Docker container | `npm install -g`, authenticate CLI once |
-| **Ban risk** | Higher — Anthropic can detect non-browser traffic patterns (user-agent, timing, token consumption) | Lower — traffic originates from Anthropic's own binary, indistinguishable from normal CLI usage |
-| **Token rotation** | Session tokens expire, need manual re-extraction | CLI handles OAuth refresh automatically |
-| **Tool calling** | Chat only, no tool execution | Full CLI toolchain — Bash, file I/O, web search, browser automation |
-| **Latency** | Lower — direct HTTP call | Higher — subprocess spawn + CLI overhead per request |
-| **Concurrency** | Supports multiple concurrent requests | One request at a time per CLI process |
-| **Dependencies** | Docker / reverse proxy | Node.js + Claude Code CLI |
+|  | Benson's TTY approach | This project (pipe + stream-json) |
+|--|----------------------|-----------------------------------|
+| **CLI interaction** | Pseudo-TTY (`node-pty`) emulates terminal, parses human-readable output | `spawn()` with piped stdio, reads structured JSON stream |
+| **Output parsing** | Parse terminal text — needs to handle ANSI codes, formatting, edge cases | Structured `stream-json` events — typed, predictable, no ambiguity |
+| **Stability** | CLI UI changes can break parsing | Relies on CLI's machine-readable format, less likely to break |
+| **Smart Streaming** | Needs custom logic to separate intermediate from final output | Turn boundaries (`message_start` / `result`) clearly marked in JSON |
+| **Tool call visibility** | Terminal output mixes tools and responses | Each event typed — `content_delta`, `tool_use`, `result` are distinct |
+| **Dependencies** | `node-pty` (native module, needs build tools) | No native dependencies, pure JS |
+| **Latency** | Lower — persistent TTY session, no per-request spawn | Higher — new subprocess per request |
+| **Session reuse** | Keeps terminal open between requests | Spawns fresh CLI per request, uses `--resume` for context |
 
 ## Key Features
 

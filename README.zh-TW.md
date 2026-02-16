@@ -12,18 +12,18 @@
 
 ## 方案對比
 
-把 Claude Max 訂閱變成 API 主要有兩種做法。本專案採用 CLI 方案，基於 [Benson Sun 的架構設計](https://x.com/BensonTWN/status/2022718855177736395)。
+兩種方案都走 Claude Code CLI 來避免 Session Token 的風險。[Benson Sun 的原始設計](https://x.com/BensonTWN/status/2022718855177736395)用 pseudo-TTY 模擬真實終端，本專案改用 `child_process.spawn()` 搭配 pipe I/O 和 CLI 的 `--output-format stream-json`。
 
-|  | Session Token Proxy | CLI Proxy（本專案）|
-|--|---------------------|-------------------|
-| **運作方式** | 從瀏覽器抽取 `sessionKey` cookie，反向代理模擬瀏覽器流量存取 `claude.ai` | Spawn Claude Code CLI 作為子程序，透過 OpenAI 相容 HTTP API 轉接 |
-| **設定** | 從瀏覽器複製 cookie，跑 Docker 容器 | `npm install -g`，CLI 認證一次 |
-| **被 Ban 風險** | 較高 — Anthropic 能偵測非瀏覽器的流量特徵（user-agent、timing、token consumption）| 較低 — 流量從 Anthropic 自己的 binary 發出，跟正常 CLI 使用無法區分 |
-| **Token 更新** | Session token 會過期，需要手動重新抽取 | CLI 自動處理 OAuth refresh |
-| **工具呼叫** | 僅聊天，無法執行工具 | 完整 CLI 工具鏈 — Bash、檔案讀寫、網頁搜尋、瀏覽器自動化 |
-| **延遲** | 較低 — 直接 HTTP 呼叫 | 較高 — 子程序 spawn + CLI overhead |
-| **併發** | 支援多個同時請求 | 每個 CLI 程序同時處理一個請求 |
-| **依賴** | Docker / 反向代理 | Node.js + Claude Code CLI |
+|  | Benson 的 TTY 方案 | 本專案（pipe + stream-json）|
+|--|--------------------|-----------------------------|
+| **CLI 互動方式** | Pseudo-TTY（`node-pty`）模擬終端，解析人類可讀的輸出 | `spawn()` 搭配 piped stdio，讀取結構化 JSON stream |
+| **輸出解析** | 解析終端文字 — 需處理 ANSI 碼、格式化、各種 edge case | 結構化的 `stream-json` 事件 — 有型別、可預測、無歧義 |
+| **穩定性** | CLI 的 UI 改版可能會破壞解析邏輯 | 依賴 CLI 的機器可讀格式，不容易壞 |
+| **智慧串流** | 需要自己寫邏輯分辨中間輸出和最終回覆 | Turn 邊界（`message_start` / `result`）在 JSON 中有明確標記 |
+| **工具呼叫可見性** | 終端輸出混雜工具和回覆 | 每個事件有獨立型別 — `content_delta`、`tool_use`、`result` 清楚區分 |
+| **依賴** | `node-pty`（原生模組，需要 build tools）| 無原生依賴，純 JS |
+| **延遲** | 較低 — 持久 TTY session，不需每次 spawn | 較高 — 每個 request spawn 新子程序，用 `--resume` 維持 context |
+| **Session 重用** | 終端保持開啟，跨請求重用 | 每次 spawn 新 CLI，用 `--resume` 接續對話 |
 
 ## 核心功能
 
