@@ -1,0 +1,59 @@
+{
+  "name": "claude-max-api-proxy",
+  "version": "1.2.0",
+  "description": "Use your Claude Max subscription with any OpenAI-compatible client. Wraps Claude Code CLI as an OpenAI-compatible API server.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "claude-max-api": "dist/server/standalone.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/server/standalone.js",
+    "test": "node --test dist/**/*.test.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude",
+    "anthropic",
+    "claude-code",
+    "claude-max",
+    "openai-compatible",
+    "api-server",
+    "oauth",
+    "llm",
+    "ai"
+  ],
+  "author": "GodYeh",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GodYeh/claude-max-api-proxy"
+  },
+  "bugs": {
+    "url": "https://github.com/GodYeh/claude-max-api-proxy/issues"
+  },
+  "homepage": "https://github.com/GodYeh/claude-max-api-proxy#readme",
+  "dependencies": {
+    "express": "^4.21.2",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.7",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "CONTRIBUTING.md"
+  ]
+}
