@@ -2,34 +2,29 @@
 
 **English | [繁體中文](README.zh-TW.md)**
 
-**Use Opus 4.6 as your daily AI assistant — through Telegram and Discord — powered by your $200/month Claude Max subscription and [OpenClaw](https://openclaw.dev).**
+**Turn your $200/month Claude Max subscription into a Telegram/Discord AI assistant — powered by [OpenClaw](https://openclaw.dev).**
 
 ## Why This Exists
 
-Opus 4.6 is the best conversational AI model available today. It has personality, strong reasoning, and a directness that no other model matches. The problem? Using it through the Anthropic API burns $10+/hour on heavy workloads. Claude Max gives you unlimited Opus for $200/month flat — but only through the web UI and Claude Code CLI.
+Claude Max ($200/month) includes unlimited access to Opus, Sonnet, and Haiku — but only through the web UI and Claude Code CLI. There's no API key you can plug into other tools.
 
-This proxy bridges the gap. It wraps Claude Code CLI as a local HTTP server that speaks the OpenAI API format, designed to work with [OpenClaw](https://openclaw.dev) as the Telegram/Discord bot frontend.
+This proxy wraps Claude Code CLI as a local HTTP server with an OpenAI-compatible API, so [OpenClaw](https://openclaw.dev) can use it as the backend for Telegram and Discord bots.
 
-## Why Not Just Use Session Tokens?
+## Why CLI Instead of Session Tokens?
 
-Many people extract Claude Max session tokens and plug them into third-party services. This works, but it's risky:
+Some people extract session tokens from the browser and use them directly. That works, but Anthropic can detect non-standard traffic patterns and ban the account — losing all conversation history and Projects.
 
-| Approach | How It Works | Risk |
-|----------|-------------|------|
-| **Session token extraction** | Steal cookie/token from browser | Anthropic can detect non-CLI traffic patterns (user-agent, request timing, token consumption). Account ban = all conversation history, Projects, and fine-tuned context gone forever. |
-| **This proxy (Claude Code CLI)** | Every request goes through Anthropic's own binary | Indistinguishable from sitting at your terminal typing. It *is* Claude Code — just with input coming from your phone instead of your keyboard. |
-
-The key insight: Claude Code CLI is an official Anthropic product. Traffic from it is legitimate developer usage. This proxy doesn't fake anything — it literally spawns the real CLI as a subprocess.
+This proxy takes a different approach: it spawns the real Claude Code CLI binary as a subprocess. Every request goes through Anthropic's official tool, so the traffic is indistinguishable from normal CLI usage.
 
 > Based on [Benson Sun's architecture](https://x.com/BensonTWN/status/2022718855177736395) — open-sourced for the community.
 
 ## Key Features
 
 ### One Brain, One Context
-Traditional setups use one model for chat and a separate coding agent for development tasks. Two brains passing context back and forth means latency and information loss. This proxy runs everything through a single Claude Code CLI session — chatting, reading files, writing code, running tests, git commits — all in the same context. Read a requirement, edit the file, run the test, report back. No handoffs.
+Chat and code execution share the same Claude Code CLI session. The model can read a file, edit it, run tests, and report back — all within one continuous context. No separate agents, no context passing between services.
 
 ### Smart Streaming
-Other proxies dump all intermediate output to the client — tool-calling thoughts, internal reasoning, debugging text. Smart Streaming buffers each turn and only streams the final response. Your users see a clean answer, not the sausage-making.
+The CLI produces intermediate output during tool calls — thinking steps, command output, internal reasoning. Smart Streaming buffers all of this and only forwards the final response to the client.
 
 ```
 Without Smart Streaming:
@@ -41,11 +36,11 @@ With Smart Streaming:
   "The result is: hello"            ← only this reaches the client
 ```
 
-### Agentic Tool Calling (No Turn Limits)
-The CLI has full access to tools — Bash, file I/O, web search, browser automation. Unlike basic proxies that cap tool calls at a fixed number, this proxy removes turn limits entirely. Complex multi-step tasks run to completion.
+### No Turn Limits
+The CLI can execute as many tool calls as needed — Bash commands, file I/O, web search, browser automation. There's no artificial cap on the number of rounds, so complex tasks run to completion.
 
 ### Full OpenClaw Agent Parity
-When paired with [OpenClaw](https://openclaw.dev), this proxy achieves 100% feature parity with native OpenClaw agents:
+When used with [OpenClaw](https://openclaw.dev), this proxy supports all native agent features:
 - **Web search** — Search and summarize web content
 - **Browser automation** — Playwright-powered Chrome control with login state
 - **Voice messages** — Whisper transcription in, TTS voice bubbles out

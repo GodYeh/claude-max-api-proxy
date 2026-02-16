@@ -2,34 +2,29 @@
 
 **[English](README.md) | 繁體中文**
 
-**把 Opus 4.6 變成你的日常 AI 助手 — 透過 Telegram 和 Discord — 用你每月 $200 的 Claude Max 訂閱搭配 [OpenClaw](https://openclaw.dev) 驅動。**
+**把你每月 $200 的 Claude Max 訂閱變成 Telegram/Discord AI 助手 — 搭配 [OpenClaw](https://openclaw.dev) 驅動。**
 
 ## 為什麼做這個
 
-Opus 4.6 是目前最好的對話 AI 模型。它有個性、推理能力超強、講話直接像個靠譜的工程師直男，但關鍵時刻又會給你足夠的情緒價值。問題是？透過 Anthropic API 按量計費，重度使用一小時就能燒掉 $10+。Claude Max 每月 $200 吃到飽 — 但只能透過網頁 UI 和 Claude Code CLI 使用。
+Claude Max（$200/月）包含 Opus、Sonnet、Haiku 無限使用 — 但只能透過網頁 UI 和 Claude Code CLI 存取，沒有 API Key 可以接到其他工具上。
 
-這個 Proxy 打通了這道牆。它把 Claude Code CLI 包裝成本地 HTTP 伺服器，對外說 OpenAI 的語言，專為搭配 [OpenClaw](https://openclaw.dev) 作為 Telegram/Discord 機器人前端而設計。
+這個 Proxy 把 Claude Code CLI 包裝成本地 HTTP 伺服器，提供 OpenAI 相容的 API，讓 [OpenClaw](https://openclaw.dev) 可以拿來當 Telegram/Discord 機器人的後端。
 
-## 為什麼不直接用 Session Token？
+## 為什麼用 CLI 而不是 Session Token？
 
-很多人現在是拿 Claude Max 的 Session Token 去接第三方服務。能用，但風險很高：
+有些人會從瀏覽器抽取 Session Token 直接使用。可以動，但 Anthropic 能偵測到非標準的流量特徵，帳號被 Ban 的話所有對話紀錄和 Projects 都會消失。
 
-| 方案 | 做法 | 風險 |
-|------|------|------|
-| **Session Token 抽取** | 從瀏覽器偷 cookie/token | Anthropic 能偵測非 CLI 的流量特徵（user-agent、request timing、token consumption）。帳號被 Ban = 所有對話紀錄、Projects、花幾週調教出來的思維慣性全部歸零。 |
-| **這個 Proxy（Claude Code CLI）** | 每個 request 都經過 Anthropic 自己的 Binary | 跟你坐在 Terminal 前面打字完全一樣。這*就是* Claude Code — 只是輸入從鍵盤搬到了手機。 |
-
-核心洞察：Claude Code CLI 是 Anthropic 的官方產品。從它發出的流量就是正規的開發行為。這個 Proxy 不偽造任何東西 — 它真的就是 spawn 了一個 CLI 子程序。
+這個 Proxy 走不同的路：直接 spawn 真正的 Claude Code CLI binary 作為子程序。每個 request 都經過 Anthropic 的官方工具，流量跟正常的 CLI 使用沒有區別。
 
 > 基於 [Benson Sun 的架構設計](https://x.com/BensonTWN/status/2022718855177736395)，開源出來給社群使用。
 
 ## 核心功能
 
 ### 一個大腦、一份 Context
-傳統架構用一個模型聊天、另一個 Coding Agent 寫程式。兩個腦子來回傳話，每一層都有延遲跟 Context 丟失。這個 Proxy 讓所有事情都跑在同一個 Claude Code CLI session 裡 — 聊天、讀檔案、改代碼、跑測試、Git Commit — 全部共用同一份 Context。讀完需求下一秒就能改檔案，改完直接回報。沒有交接。
+聊天和程式碼執行共用同一個 Claude Code CLI session。模型可以讀檔、改檔、跑測試、回報結果 — 全部在同一份連續的 context 裡完成，不需要在不同服務之間傳遞上下文。
 
 ### 智慧串流 (Smart Streaming)
-一般 proxy 會把所有中間輸出都丟給客戶端 — 工具呼叫的思考過程、內部推理、除錯文字。智慧串流會暫存每一輪的輸出，只串流最終回覆。你的使用者只看到乾淨的答案。
+CLI 在工具呼叫過程中會產生中間輸出 — 思考步驟、命令結果、內部推理。智慧串流會暫存這些內容，只把最終回覆轉發給客戶端。
 
 ```
 沒有智慧串流：
@@ -41,11 +36,11 @@ Opus 4.6 是目前最好的對話 AI 模型。它有個性、推理能力超強�
   "結果是: hello"                   ← 只有這個到達客戶端
 ```
 
-### Agent 工具呼叫（無輪數限制）
-CLI 可以完整使用工具 — Bash、檔案讀寫、網頁搜尋、瀏覽器自動化。不像一般 proxy 把工具呼叫限制在固定次數，這個 proxy 完全移除了輪數限制。複雜的多步驟任務可以完整執行到結束。
+### 無輪數限制
+CLI 可以執行任意數量的工具呼叫 — Bash 指令、檔案讀寫、網頁搜尋、瀏覽器自動化。沒有人為的輪數上限，複雜任務可以完整執行到結束。
 
-### 100% 追平 OpenClaw 原生 Agent
-搭配 [OpenClaw](https://openclaw.dev) 使用時，這個 Proxy 達到與原生 Agent 完全一致的功能：
+### 完整支援 OpenClaw Agent 功能
+搭配 [OpenClaw](https://openclaw.dev) 使用時，這個 Proxy 支援所有原生 Agent 功能：
 - **搜尋網頁** — 搜尋並摘要網頁內容
 - **瀏覽器自動化** — Playwright 驅動的 Chrome 控制，支援登入態
 - **語音訊息** — Whisper 轉錄輸入，TTS 語音泡泡輸出
