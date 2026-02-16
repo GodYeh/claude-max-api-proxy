@@ -2,24 +2,34 @@
 
 **[English](README.md) | 繁體中文**
 
-**把你每月 $200 的 Claude Max 訂閱變成完整的 OpenAI 相容 API — 支援 Agent 工具呼叫、智慧串流、Telegram 機器人整合。**
+**把 Opus 4.6 變成你的日常 AI 助手 — 透過 Telegram、Discord 或任何 OpenAI 相容客戶端 — 用你每月 $200 的 Claude Max 訂閱驅動。**
 
-大多數人花每月 $200 訂閱 Claude Max，卻只能透過網頁 UI 或 Claude Code CLI 使用。這個 Proxy 把你的訂閱解鎖為標準 API，任何 OpenAI 相容的客戶端（聊天機器人、自動化平台、自訂應用）都能使用 — 不需額外費用。
+## 為什麼做這個
 
-## 解決什麼問題
+Opus 4.6 是目前最好的對話 AI 模型。它有個性、推理能力超強、講話直接像個靠譜的工程師直男，但關鍵時刻又會給你足夠的情緒價值。問題是？透過 Anthropic API 按量計費，重度使用一小時就能燒掉 $10+。Claude Max 每月 $200 吃到飽 — 但只能透過網頁 UI 和 Claude Code CLI 使用。
 
-| 方案 | 月費 | 你得到什麼 |
-|------|------|-----------|
-| Claude API（按量計費）| ~$50–200+ 依用量 | 完整 API，但很貴 |
-| Claude Max 訂閱 | $200 固定 | 只有網頁 UI + CLI |
-| **這個 Proxy** | **$0 額外費用**（用你的 Max 訂閱）| **完整 API** |
+這個 Proxy 打通了這道牆。它把 Claude Code CLI 包裝成本地 HTTP 伺服器，對外說 OpenAI 的語言。任何支援 OpenAI 的客戶端 — 聊天機器人、自動化平台、VS Code 外掛 — 都能直接用你的 Max 訂閱。
 
-Anthropic 封鎖了 OAuth token 的第三方 API 使用。但 Claude Code CLI *可以*使用你的訂閱。這個 Proxy 把 CLI 包裝成子程序，對外暴露標準的 OpenAI 相容 HTTP API。
+## 為什麼不直接用 Session Token？
+
+很多人現在是拿 Claude Max 的 Session Token 去接第三方服務。能用，但風險很高：
+
+| 方案 | 做法 | 風險 |
+|------|------|------|
+| **Session Token 抽取** | 從瀏覽器偷 cookie/token | Anthropic 能偵測非 CLI 的流量特徵（user-agent、request timing、token consumption）。帳號被 Ban = 所有對話紀錄、Projects、花幾週調教出來的思維慣性全部歸零。 |
+| **這個 Proxy（Claude Code CLI）** | 每個 request 都經過 Anthropic 自己的 Binary | 跟你坐在 Terminal 前面打字完全一樣。這*就是* Claude Code — 只是輸入從鍵盤搬到了手機。 |
+
+核心洞察：Claude Code CLI 是 Anthropic 的官方產品。從它發出的流量就是正規的開發行為。這個 Proxy 不偽造任何東西 — 它真的就是 spawn 了一個 CLI 子程序。
+
+> 靈感來自 [Benson Sun 的分析](https://x.com/BensonTWN/status/2022718855177736395)：透過 CLI 才是唯一可持續的做法。
 
 ## 核心功能
 
+### 一個大腦、一份 Context
+傳統架構用一個模型聊天、另一個 Coding Agent 寫程式。兩個腦子來回傳話，每一層都有延遲跟 Context 丟失。這個 Proxy 讓所有事情都跑在同一個 Claude Code CLI session 裡 — 聊天、讀檔案、改代碼、跑測試、Git Commit — 全部共用同一份 Context。讀完需求下一秒就能改檔案，改完直接回報。沒有交接。
+
 ### 智慧串流 (Smart Streaming)
-一般的 proxy 會把所有中間輸出都丟給客戶端 — 工具呼叫的思考過程、內部推理、除錯文字。**智慧串流會暫存每一輪的輸出，只串流最終回覆。** 你的使用者只看到乾淨的答案。
+一般 proxy 會把所有中間輸出都丟給客戶端 — 工具呼叫的思考過程、內部推理、除錯文字。智慧串流會暫存每一輪的輸出，只串流最終回覆。你的使用者只看到乾淨的答案。
 
 ```
 沒有智慧串流：
@@ -32,39 +42,43 @@ Anthropic 封鎖了 OAuth token 的第三方 API 使用。但 Claude Code CLI *�
 ```
 
 ### Agent 工具呼叫（無輪數限制）
-CLI 模型可以完整使用工具 — Bash、檔案讀寫、網頁搜尋、瀏覽器自動化。不像一般 proxy 把工具呼叫限制在固定次數，這個 proxy 完全移除了輪數限制。複雜的多步驟任務（程式碼生成、資料分析、檔案處理）可以完整執行到結束。
+CLI 可以完整使用工具 — Bash、檔案讀寫、網頁搜尋、瀏覽器自動化。不像一般 proxy 把工具呼叫限制在固定次數，這個 proxy 完全移除了輪數限制。複雜的多步驟任務可以完整執行到結束。
+
+### 100% 追平 OpenClaw 原生 Agent
+搭配 [OpenClaw](https://openclaw.dev) 使用時，這個 Proxy 達到與原生 Agent 完全一致的功能：
+- **搜尋網頁** — 搜尋並摘要網頁內容
+- **瀏覽器自動化** — Playwright 驅動的 Chrome 控制，支援登入態
+- **語音訊息** — Whisper 轉錄輸入，TTS 語音泡泡輸出
+- **排程任務** — Cron 定時任務執行
+- **子代理** — 產生子 Agent 平行處理工作
+- **媒體附件** — 截圖、檔案、音訊以原生 Telegram/Discord 媒體發送
 
 ### 對話持久化
-對話能跨訊息維持上下文。Proxy 把每個客戶端對話對應到一個 Claude CLI session，模型會記住你們討論的內容 — 不需要每次都重送完整歷史。
+對話能跨訊息維持上下文。Proxy 把每個客戶端對話對應到一個 Claude CLI session — 不需要每次都重送完整歷史。
 
-### 超時保護與通知
-10 分鐘的活動超時機制可以捕捉真正卡住的程序，同時讓長時間執行的任務（下載、建置）正常完成。超時觸發時，會透過 Telegram 通知你，而不是靜默失敗。
-
-### OpenClaw / Telegram 整合
-可與 [OpenClaw](https://openclaw.dev) 搭配作為 Telegram 機器人後端：
-- **語音訊息** — 接收語音備忘錄，透過 Whisper 轉錄，以 TTS 語音泡泡回覆
-- **瀏覽器自動化** — 控制託管的 Chrome 實例執行網頁任務
-- **排程任務** — 定時任務執行
-- **媒體附件** — 截圖、檔案、音訊以原生 Telegram 媒體發送
+### 超時保護
+10 分鐘的活動超時機制捕捉卡住的程序，同時讓長時間執行的任務正常完成。超時觸發時會透過 Telegram 通知你。
 
 ## 運作原理
 
 ```
-你的 App / Telegram Bot / 任何 OpenAI 客戶端
+你的手機（Telegram / Discord）或任何 OpenAI 客戶端
          ↓
     POST /v1/chat/completions（OpenAI 格式）
          ↓
-    Claude Max API Proxy（本專案）
+    Claude Max API Proxy（本專案，跑在你的 Mac 上）
          ↓  轉換請求 → CLI 輸入
          ↓  管理 session 和串流
          ↓
-    Claude Code CLI（子程序，帶工具）
+    Claude Code CLI（Anthropic 官方 Binary，帶完整工具）
          ↓  使用你的 Max 訂閱 OAuth
          ↓
     Anthropic API
          ↓
-    回應 → 智慧串流過濾 → OpenAI SSE 格式 → 你的 App
+    回應 → 智慧串流過濾 → OpenAI SSE 格式 → 你的手機
 ```
+
+沒有任何第三方伺服器。所有東西都在你的機器上跑。Request 從 Anthropic 自己的 Binary 出去 — 跟你坐在 Terminal 前面打字完全一樣。
 
 ## 快速開始
 
@@ -168,7 +182,7 @@ launchctl load ~/Library/LaunchAgents/com.claude-max-api.plist
 
 ## 搭配常用工具
 
-### OpenClaw（Telegram Bot）
+### OpenClaw（Telegram / Discord Bot）
 
 在 `openclaw.json` 中新增為模型提供者：
 ```json
@@ -243,7 +257,7 @@ dist/
 ├── session/
 │   └── manager.js          # 對話 → CLI session 對應
 ├── server/
-│   ├── routes.js            # 智慧串流、SSE、超時通知
+│   ├── routes.js            # 智慧串流、SSE、進度通知
 │   ├── index.js             # Express 伺服器設定
 │   └── standalone.js        # 進入點
 └── types/
@@ -257,11 +271,17 @@ dist/
 - **無寫死的秘密** — 所有敏感設定透過環境變數
 - **僅限本機** — 預設綁定 `127.0.0.1`，不對外暴露
 
+## 使用建議
+
+- **不要拿 Opus 跑 heartbeat/cron** — 固定間隔的 request 可能被視為機器流量。排程任務交給輕量模型（Gemini Flash、Haiku）就好，殺雞不用牛刀。
+- **注意 weekly token 上限** — 這個 Proxy 不會繞過任何用量限制。如果你的 Claude Code 很少用到 weekly 上限，就有很大的空間可以用。
+
 ## 授權條款
 
 MIT
 
 ## 致謝
 
-- 原始概念來自 [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)（fork 來源）
-- 智慧串流、Session 管理、OpenClaw 整合由 [@anthropic-ai/claude-code](https://github.com/anthropics/claude-code) 實作
+- 靈感來自 [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395) 對 CLI proxy 方案的分析
+- 原始代碼 fork 自 [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
+- 智慧串流、Session 管理、OpenClaw 整合由 [Claude Code](https://github.com/anthropics/claude-code) 實作

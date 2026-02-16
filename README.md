@@ -2,24 +2,34 @@
 
 **English | [繁體中文](README.zh-TW.md)**
 
-**Turn your $200/month Claude Max subscription into a full OpenAI-compatible API — with agentic tool-calling, smart streaming, and Telegram bot integration.**
+**Use Opus 4.6 as your daily AI assistant — through Telegram, Discord, or any OpenAI-compatible client — powered by your $200/month Claude Max subscription.**
 
-Most people pay $200/month for Claude Max but can only use it through the web UI or Claude Code CLI. This proxy unlocks your subscription as a standard API, so any OpenAI-compatible client (chatbots, automation platforms, custom apps) can use it — at zero extra cost.
+## Why This Exists
 
-## The Problem
+Opus 4.6 is the best conversational AI model available today. It has personality, strong reasoning, and a directness that no other model matches. The problem? Using it through the Anthropic API burns $10+/hour on heavy workloads. Claude Max gives you unlimited Opus for $200/month flat — but only through the web UI and Claude Code CLI.
 
-| Approach | Monthly Cost | What You Get |
-|----------|-------------|--------------|
-| Claude API (pay-per-use) | ~$50–200+ depending on usage | Full API access, but expensive |
-| Claude Max subscription | $200 flat | Web UI + Claude Code CLI only |
-| **This Proxy** | **$0 extra** (uses your Max sub) | **Full API access via CLI** |
+This proxy bridges the gap. It wraps Claude Code CLI as a local HTTP server that speaks the OpenAI API format. Any client that supports OpenAI — chatbots, automation platforms, VS Code extensions — can now use your Max subscription directly.
 
-Anthropic blocks OAuth tokens from third-party API use. But Claude Code CLI *can* use your subscription. This proxy wraps the CLI as a subprocess and exposes a standard OpenAI-compatible HTTP API.
+## Why Not Just Use Session Tokens?
+
+Many people extract Claude Max session tokens and plug them into third-party services. This works, but it's risky:
+
+| Approach | How It Works | Risk |
+|----------|-------------|------|
+| **Session token extraction** | Steal cookie/token from browser | Anthropic can detect non-CLI traffic patterns (user-agent, request timing, token consumption). Account ban = all conversation history, Projects, and fine-tuned context gone forever. |
+| **This proxy (Claude Code CLI)** | Every request goes through Anthropic's own binary | Indistinguishable from sitting at your terminal typing. It *is* Claude Code — just with input coming from your phone instead of your keyboard. |
+
+The key insight: Claude Code CLI is an official Anthropic product. Traffic from it is legitimate developer usage. This proxy doesn't fake anything — it literally spawns the real CLI as a subprocess.
+
+> Inspired by [Benson Sun's analysis](https://x.com/BensonTWN/status/2022718855177736395) on why CLI-based proxying is the only sustainable approach.
 
 ## Key Features
 
+### One Brain, One Context
+Traditional setups use one model for chat and a separate coding agent for development tasks. Two brains passing context back and forth means latency and information loss. This proxy runs everything through a single Claude Code CLI session — chatting, reading files, writing code, running tests, git commits — all in the same context. Read a requirement, edit the file, run the test, report back. No handoffs.
+
 ### Smart Streaming
-Standard proxies dump all intermediate output to the client — tool-calling thoughts, internal reasoning, debugging text. **Smart Streaming buffers each turn and only streams the final response.** Your users see a clean answer, not the sausage-making.
+Other proxies dump all intermediate output to the client — tool-calling thoughts, internal reasoning, debugging text. Smart Streaming buffers each turn and only streams the final response. Your users see a clean answer, not the sausage-making.
 
 ```
 Without Smart Streaming:
@@ -32,39 +42,43 @@ With Smart Streaming:
 ```
 
 ### Agentic Tool Calling (No Turn Limits)
-The CLI model has full access to tools — Bash, file I/O, web search, browser automation. Unlike basic proxies that cap tool calls at a fixed number, this proxy removes turn limits entirely. Complex multi-step tasks (code generation, data analysis, file processing) run to completion.
+The CLI has full access to tools — Bash, file I/O, web search, browser automation. Unlike basic proxies that cap tool calls at a fixed number, this proxy removes turn limits entirely. Complex multi-step tasks run to completion.
+
+### Full OpenClaw Agent Parity
+When paired with [OpenClaw](https://openclaw.dev), this proxy achieves 100% feature parity with native OpenClaw agents:
+- **Web search** — Search and summarize web content
+- **Browser automation** — Playwright-powered Chrome control with login state
+- **Voice messages** — Whisper transcription in, TTS voice bubbles out
+- **Scheduled tasks** — Cron-based task execution
+- **Sub-agents** — Spawn child agents for parallel work
+- **Media attachments** — Screenshots, files, audio as native Telegram/Discord media
 
 ### Session Persistence
-Conversations maintain context across messages. The proxy maps each client conversation to a Claude CLI session, so the model remembers what you discussed — no need to resend the full history every time.
+Conversations maintain context across messages. The proxy maps each client conversation to a Claude CLI session — no need to resend full history every time.
 
-### Timeout Protection with Notifications
-A 10-minute activity timeout catches genuinely stuck processes, while letting long-running tasks (downloads, builds) complete normally. When a timeout fires, you get notified via Telegram (or your configured channel) instead of silently failing.
-
-### OpenClaw / Telegram Integration
-Built to work with [OpenClaw](https://openclaw.dev) as a Telegram bot backend:
-- **Voice messages** — Receives voice notes, transcribes via Whisper, replies with TTS voice bubbles
-- **Browser automation** — Controls a managed Chrome instance for web tasks
-- **Cron jobs** — Scheduled task execution
-- **Media attachments** — Screenshots, files, audio sent as native Telegram media
+### Timeout Protection
+10-minute activity timeout catches stuck processes while letting long-running tasks complete normally. Timeout notifications are sent to Telegram so you know what happened.
 
 ## How It Works
 
 ```
-Your App / Telegram Bot / Any OpenAI Client
+Your Phone (Telegram / Discord) or Any OpenAI Client
          ↓
     POST /v1/chat/completions (OpenAI format)
          ↓
-    Claude Max API Proxy (this project)
+    Claude Max API Proxy (this project, runs on your Mac)
          ↓  converts request → CLI input
          ↓  manages sessions & streaming
          ↓
-    Claude Code CLI (subprocess with tools)
+    Claude Code CLI (Anthropic's official binary, with full tools)
          ↓  uses your Max subscription OAuth
          ↓
     Anthropic API
          ↓
-    Response → Smart Stream filter → OpenAI SSE format → Your App
+    Response → Smart Stream filter → OpenAI SSE format → Your Phone
 ```
+
+No third-party servers. Everything runs locally on your machine. The request leaves through Anthropic's own binary — identical to you typing in your terminal.
 
 ## Quick Start
 
@@ -168,7 +182,7 @@ Full model family support with version pinning (e.g. `claude-opus-4-5-20251101`)
 
 ## Use With Popular Tools
 
-### OpenClaw (Telegram Bot)
+### OpenClaw (Telegram / Discord Bot)
 
 Add as a model provider in `openclaw.json`:
 ```json
@@ -243,7 +257,7 @@ dist/
 ├── session/
 │   └── manager.js          # Conversation → CLI session mapping
 ├── server/
-│   ├── routes.js            # Smart streaming, SSE, timeout notifications
+│   ├── routes.js            # Smart streaming, SSE, progress notifications
 │   ├── index.js             # Express server setup
 │   └── standalone.js        # Entry point
 └── types/
@@ -257,11 +271,17 @@ dist/
 - **No hardcoded secrets** — All sensitive config via environment variables
 - **Local only by default** — Binds to `127.0.0.1`, not exposed to network
 
+## Tips
+
+- **Don't run heartbeat/cron jobs through Opus** — Fixed-interval requests look like bot traffic. Use lightweight models (Gemini Flash, Haiku) for scheduled tasks.
+- **Stay within your weekly token limits** — The proxy doesn't circumvent any usage caps. If you rarely hit your Claude Code weekly limit, you have plenty of headroom.
+
 ## License
 
 MIT
 
 ## Credits
 
-- Original concept by [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy) (fork origin)
-- Smart streaming, session management, and OpenClaw integration by [@anthropic-ai/claude-code](https://github.com/anthropics/claude-code)
+- Concept inspired by [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395)'s analysis on CLI-based proxying
+- Original codebase forked from [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
+- Smart streaming, session management, and OpenClaw integration built with [Claude Code](https://github.com/anthropics/claude-code)
