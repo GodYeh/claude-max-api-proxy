@@ -62,7 +62,7 @@ Conversations maintain context across messages. The proxy maps each client conve
 ## How It Works
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Architecture Diagram" width="700" />
+  <img src="docs/architecture.png" alt="Architecture Diagram" width="700" />
 </p>
 
 No third-party servers. Everything runs locally on your machine. The request leaves through Anthropic's own binary — identical to you typing in your terminal.

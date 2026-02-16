@@ -62,7 +62,7 @@ CLI 可以完整使用工具 — Bash、檔案讀寫、網頁搜尋、瀏覽器�
 ## 運作原理
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="架構圖" width="700" />
+  <img src="docs/architecture.png" alt="架構圖" width="700" />
 </p>
 
 沒有任何第三方伺服器。所有東西都在你的機器上跑。Request 從 Anthropic 自己的 Binary 出去 — 跟你坐在 Terminal 前面打字完全一樣。
