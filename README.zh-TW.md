@@ -21,7 +21,7 @@ Opus 4.6 是目前最好的對話 AI 模型。它有個性、推理能力超強�
 
 核心洞察：Claude Code CLI 是 Anthropic 的官方產品。從它發出的流量就是正規的開發行為。這個 Proxy 不偽造任何東西 — 它真的就是 spawn 了一個 CLI 子程序。
 
-> 靈感來自 [Benson Sun 的分析](https://x.com/BensonTWN/status/2022718855177736395)：透過 CLI 才是唯一可持續的做法。
+> 基於 [Benson Sun 的架構設計](https://x.com/BensonTWN/status/2022718855177736395)，開源出來給社群使用。
 
 ## 核心功能
 
@@ -61,22 +61,9 @@ CLI 可以完整使用工具 — Bash、檔案讀寫、網頁搜尋、瀏覽器�
 
 ## 運作原理
 
-```
-你的手機（Telegram / Discord）或任何 OpenAI 客戶端
-         ↓
-    POST /v1/chat/completions（OpenAI 格式）
-         ↓
-    Claude Max API Proxy（本專案，跑在你的 Mac 上）
-         ↓  轉換請求 → CLI 輸入
-         ↓  管理 session 和串流
-         ↓
-    Claude Code CLI（Anthropic 官方 Binary，帶完整工具）
-         ↓  使用你的 Max 訂閱 OAuth
-         ↓
-    Anthropic API
-         ↓
-    回應 → 智慧串流過濾 → OpenAI SSE 格式 → 你的手機
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="架構圖" width="700" />
+</p>
 
 沒有任何第三方伺服器。所有東西都在你的機器上跑。Request 從 Anthropic 自己的 Binary 出去 — 跟你坐在 Terminal 前面打字完全一樣。
 
@@ -282,6 +269,6 @@ MIT
 
 ## 致謝
 
-- 靈感來自 [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395) 對 CLI proxy 方案的分析
-- 原始代碼 fork 自 [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
+- 原始概念與架構設計來自 [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395) — 本專案是他方案的開源實作，有部分改動
+- 初始代碼 fork 自 [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
 - 智慧串流、Session 管理、OpenClaw 整合由 [Claude Code](https://github.com/anthropics/claude-code) 實作

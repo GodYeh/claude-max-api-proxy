@@ -21,7 +21,7 @@ Many people extract Claude Max session tokens and plug them into third-party ser
 
 The key insight: Claude Code CLI is an official Anthropic product. Traffic from it is legitimate developer usage. This proxy doesn't fake anything — it literally spawns the real CLI as a subprocess.
 
-> Inspired by [Benson Sun's analysis](https://x.com/BensonTWN/status/2022718855177736395) on why CLI-based proxying is the only sustainable approach.
+> Based on [Benson Sun's architecture](https://x.com/BensonTWN/status/2022718855177736395) — open-sourced for the community.
 
 ## Key Features
 
@@ -61,22 +61,9 @@ Conversations maintain context across messages. The proxy maps each client conve
 
 ## How It Works
 
-```
-Your Phone (Telegram / Discord) or Any OpenAI Client
-         ↓
-    POST /v1/chat/completions (OpenAI format)
-         ↓
-    Claude Max API Proxy (this project, runs on your Mac)
-         ↓  converts request → CLI input
-         ↓  manages sessions & streaming
-         ↓
-    Claude Code CLI (Anthropic's official binary, with full tools)
-         ↓  uses your Max subscription OAuth
-         ↓
-    Anthropic API
-         ↓
-    Response → Smart Stream filter → OpenAI SSE format → Your Phone
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture Diagram" width="700" />
+</p>
 
 No third-party servers. Everything runs locally on your machine. The request leaves through Anthropic's own binary — identical to you typing in your terminal.
 
@@ -282,6 +269,6 @@ MIT
 
 ## Credits
 
-- Concept inspired by [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395)'s analysis on CLI-based proxying
-- Original codebase forked from [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
+- Original concept and architecture by [Benson Sun](https://x.com/BensonTWN/status/2022718855177736395) — this project is an open-source implementation of his design, with some modifications
+- Initial codebase forked from [atalovesyou/claude-max-api-proxy](https://github.com/atalovesyou/claude-max-api-proxy)
 - Smart streaming, session management, and OpenClaw integration built with [Claude Code](https://github.com/anthropics/claude-code)
