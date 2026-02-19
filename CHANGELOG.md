@@ -1,5 +1,7 @@
 # Changelog
 
+**English | [繁體中文](CHANGELOG.zh-TW.md)**
+
 ## [1.3.0] - 2026-02-19
 
 ### TypeScript Source Code
