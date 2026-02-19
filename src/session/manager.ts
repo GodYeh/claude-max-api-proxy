@@ -17,7 +17,7 @@ const SESSION_FILE = path.join(
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionMapping {
-    clawdbotId: string;
+    conversationId: string;
     claudeSessionId: string;
     createdAt: number;
     lastUsedAt: number;
@@ -57,8 +57,8 @@ class SessionManager {
     /**
      * Get or create a Claude session ID for a conversation
      */
-    getOrCreate(clawdbotId: string, model = "sonnet"): string {
-        const existing = this.sessions.get(clawdbotId);
+    getOrCreate(conversationId: string, model = "sonnet"): string {
+        const existing = this.sessions.get(conversationId);
         if (existing) {
             existing.lastUsedAt = Date.now();
             existing.model = model;
@@ -67,15 +67,15 @@ class SessionManager {
 
         const claudeSessionId = uuidv4();
         const mapping: SessionMapping = {
-            clawdbotId,
+            conversationId,
             claudeSessionId,
             createdAt: Date.now(),
             lastUsedAt: Date.now(),
             model,
         };
-        this.sessions.set(clawdbotId, mapping);
+        this.sessions.set(conversationId, mapping);
         console.log(
-            `[SessionManager] Created session: ${clawdbotId} -> ${claudeSessionId}`
+            `[SessionManager] Created session: ${conversationId} -> ${claudeSessionId}`
         );
         // Fire and forget save
         this.save().catch((err) =>
@@ -87,15 +87,15 @@ class SessionManager {
     /**
      * Get existing session if it exists
      */
-    get(clawdbotId: string): SessionMapping | undefined {
-        return this.sessions.get(clawdbotId);
+    get(conversationId: string): SessionMapping | undefined {
+        return this.sessions.get(conversationId);
     }
 
     /**
      * Delete a session
      */
-    delete(clawdbotId: string): boolean {
-        const deleted = this.sessions.delete(clawdbotId);
+    delete(conversationId: string): boolean {
+        const deleted = this.sessions.delete(conversationId);
         if (deleted) {
             this.save().catch((err) =>
                 console.error("[SessionManager] Save error:", err)
@@ -127,19 +127,6 @@ class SessionManager {
         return removed;
     }
 
-    /**
-     * Get all active sessions
-     */
-    getAll(): SessionMapping[] {
-        return Array.from(this.sessions.values());
-    }
-
-    /**
-     * Get session count
-     */
-    get size(): number {
-        return this.sessions.size;
-    }
 }
 
 // Singleton instance

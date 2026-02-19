@@ -42,8 +42,8 @@ class SessionManager {
     /**
      * Get or create a Claude session ID for a conversation
      */
-    getOrCreate(clawdbotId, model = "sonnet") {
-        const existing = this.sessions.get(clawdbotId);
+    getOrCreate(conversationId, model = "sonnet") {
+        const existing = this.sessions.get(conversationId);
         if (existing) {
             existing.lastUsedAt = Date.now();
             existing.model = model;
@@ -51,14 +51,14 @@ class SessionManager {
         }
         const claudeSessionId = uuidv4();
         const mapping = {
-            clawdbotId,
+            conversationId,
             claudeSessionId,
             createdAt: Date.now(),
             lastUsedAt: Date.now(),
             model,
         };
-        this.sessions.set(clawdbotId, mapping);
-        console.log(`[SessionManager] Created session: ${clawdbotId} -> ${claudeSessionId}`);
+        this.sessions.set(conversationId, mapping);
+        console.log(`[SessionManager] Created session: ${conversationId} -> ${claudeSessionId}`);
         // Fire and forget save
         this.save().catch((err) => console.error("[SessionManager] Save error:", err));
         return claudeSessionId;
@@ -66,14 +66,14 @@ class SessionManager {
     /**
      * Get existing session if it exists
      */
-    get(clawdbotId) {
-        return this.sessions.get(clawdbotId);
+    get(conversationId) {
+        return this.sessions.get(conversationId);
     }
     /**
      * Delete a session
      */
-    delete(clawdbotId) {
-        const deleted = this.sessions.delete(clawdbotId);
+    delete(conversationId) {
+        const deleted = this.sessions.delete(conversationId);
         if (deleted) {
             this.save().catch((err) => console.error("[SessionManager] Save error:", err));
         }
@@ -96,18 +96,6 @@ class SessionManager {
             this.save().catch((err) => console.error("[SessionManager] Save error:", err));
         }
         return removed;
-    }
-    /**
-     * Get all active sessions
-     */
-    getAll() {
-        return Array.from(this.sessions.values());
-    }
-    /**
-     * Get session count
-     */
-    get size() {
-        return this.sessions.size;
     }
 }
 // Singleton instance

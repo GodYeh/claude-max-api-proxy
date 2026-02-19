@@ -1,5 +1,5 @@
 export interface SessionMapping {
-    clawdbotId: string;
+    conversationId: string;
     claudeSessionId: string;
     createdAt: number;
     lastUsedAt: number;
@@ -19,27 +19,19 @@ declare class SessionManager {
     /**
      * Get or create a Claude session ID for a conversation
      */
-    getOrCreate(clawdbotId: string, model?: string): string;
+    getOrCreate(conversationId: string, model?: string): string;
     /**
      * Get existing session if it exists
      */
-    get(clawdbotId: string): SessionMapping | undefined;
+    get(conversationId: string): SessionMapping | undefined;
     /**
      * Delete a session
      */
-    delete(clawdbotId: string): boolean;
+    delete(conversationId: string): boolean;
     /**
      * Clean up expired sessions
      */
     cleanup(): number;
-    /**
-     * Get all active sessions
-     */
-    getAll(): SessionMapping[];
-    /**
-     * Get session count
-     */
-    get size(): number;
 }
 export declare const sessionManager: SessionManager;
 export {};

@@ -1,6 +1,5 @@
 /**
  * Types for OpenAI-compatible API
- * Used for OpenClaw / Clawdbot integration
  */
 export interface OpenAIChatMessage {
     role: "system" | "user" | "assistant" | "tool";
@@ -57,22 +56,5 @@ export interface OpenAIChatChunk {
     created: number;
     model: string;
     choices: OpenAIChatChunkChoice[];
-}
-export interface OpenAIModel {
-    id: string;
-    object: "model";
-    owned_by: string;
-    created?: number;
-}
-export interface OpenAIModelList {
-    object: "list";
-    data: OpenAIModel[];
-}
-export interface OpenAIError {
-    error: {
-        message: string;
-        type: string;
-        code: string | null;
-    };
 }
 //# sourceMappingURL=openai.d.ts.map

@@ -8,13 +8,7 @@ export function isAssistantMessage(msg) {
 export function isResultMessage(msg) {
     return msg.type === "result";
 }
-export function isStreamEvent(msg) {
-    return msg.type === "stream_event";
-}
 export function isContentDelta(msg) {
-    return isStreamEvent(msg) && msg.event.type === "content_block_delta";
-}
-export function isSystemInit(msg) {
-    return msg.type === "system" && msg.subtype === "init";
+    return msg.type === "stream_event" && msg.event.type === "content_block_delta";
 }
 //# sourceMappingURL=claude-cli.js.map

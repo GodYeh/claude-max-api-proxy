@@ -1,35 +1,4 @@
 /**
- * Extract text content from Claude CLI assistant message
- */
-export function extractTextContent(message) {
-    return message.message.content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("");
-}
-/**
- * Convert Claude CLI assistant message to OpenAI streaming chunk
- */
-export function cliToOpenaiChunk(message, requestId, isFirst = false) {
-    const text = extractTextContent(message);
-    return {
-        id: `chatcmpl-${requestId}`,
-        object: "chat.completion.chunk",
-        created: Math.floor(Date.now() / 1000),
-        model: normalizeModelName(message.message.model),
-        choices: [
-            {
-                index: 0,
-                delta: {
-                    role: isFirst ? "assistant" : undefined,
-                    content: text,
-                },
-                finish_reason: message.message.stop_reason ? "stop" : null,
-            },
-        ],
-    };
-}
-/**
  * Create a final "done" chunk for streaming
  */
 export function createDoneChunk(requestId, model) {
