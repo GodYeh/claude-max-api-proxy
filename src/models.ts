@@ -18,7 +18,7 @@ export interface ModelInfo {
 }
 
 export const AVAILABLE_MODELS: readonly ModelInfo[] = [
-    { id: "claude-opus-4",     name: "Claude Opus 4.6",  alias: "opus",   reasoning: true  },
+    { id: "claude-opus-4",     name: "Claude Opus 4",    alias: "opus",   reasoning: true  },
     { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "sonnet", reasoning: false },
     { id: "claude-sonnet-4",   name: "Claude Sonnet 4.5", alias: "sonnet", reasoning: false },
     { id: "claude-haiku-4",    name: "Claude Haiku 4",    alias: "haiku",  reasoning: false },

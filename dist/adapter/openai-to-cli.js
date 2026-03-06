@@ -1,3 +1,4 @@
+import { MODEL_MAP } from "../models.js";
 // ─── Content extraction ────────────────────────────────────────────
 /**
  * Extract plain text from message content.
@@ -111,38 +112,6 @@ function cleanAssistantContent(content) {
     return cleaned.trim();
 }
 // ─── Model mapping ─────────────────────────────────────────────────
-/**
- * Maps model strings from OpenClaw to Claude CLI --model values.
- *
- * CLI accepts either aliases (opus/sonnet/haiku → latest version)
- * or full model names (claude-opus-4-5-20251101 → specific version).
- */
-const MODEL_MAP = {
-    // Short aliases → CLI built-in aliases (always latest)
-    "opus": "opus",
-    "sonnet": "sonnet",
-    "haiku": "haiku",
-    // Opus family
-    "claude-opus-4": "opus",
-    "claude-opus-4-6": "opus",
-    "claude-opus-4-5": "claude-opus-4-5-20251101",
-    "claude-opus-4-5-20251101": "claude-opus-4-5-20251101",
-    "claude-opus-4-1": "claude-opus-4-1-20250805",
-    "claude-opus-4-1-20250805": "claude-opus-4-1-20250805",
-    "claude-opus-4-0": "claude-opus-4-20250514",
-    "claude-opus-4-20250514": "claude-opus-4-20250514",
-    // Sonnet family
-    "claude-sonnet-4": "sonnet",
-    "claude-sonnet-4-6": "sonnet",
-    "claude-sonnet-4-5": "sonnet",
-    "claude-sonnet-4-5-20250929": "sonnet",
-    "claude-sonnet-4-0": "claude-sonnet-4-20250514",
-    "claude-sonnet-4-20250514": "claude-sonnet-4-20250514",
-    // Haiku family
-    "claude-haiku-4": "haiku",
-    "claude-haiku-4-5": "haiku",
-    "claude-haiku-4-5-20251001": "haiku",
-};
 /**
  * Extract Claude CLI --model value from request model string.
  * Strips provider prefixes (maxproxy/, claude-code-cli/) before lookup.

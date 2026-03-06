@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from "uuid";
 import { ClaudeSubprocess } from "../subprocess/manager.js";
 import { openaiToCli, stripAssistantBleed } from "../adapter/openai-to-cli.js";
 import { cliResultToOpenai, createDoneChunk, parseToolCalls, createToolCallChunks } from "../adapter/cli-to-openai.js";
+import { BleedDetector } from "./bleed-detector.js";
+import { AVAILABLE_MODELS } from "../models.js";
 // ── Route Handlers ─────────────────────────────────────────────────
 /**
  * Handle POST /v1/chat/completions
@@ -57,7 +59,9 @@ export async function handleChatCompletions(req, res) {
 /**
  * Handle streaming response (SSE)
  *
- * Each content_delta event is immediately written to the response stream.
+ * Normal mode streams deltas through bleed detection.
+ * Tool mode buffers the full response then emits synthesized SSE chunks,
+ * because <tool_call> markers may span multiple delta chunks.
  */
 async function handleStreamingResponse(req, res, subprocess, cliInput, requestId, subOpts, hasTools = false) {
     // Set SSE headers
@@ -72,17 +76,8 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
         let lastModel = "claude-sonnet-4";
         let isComplete = false;
         let isFirst = true;
-        // ── Bleed detection state ──────────────────────────────────
-        // We accumulate streamed text to detect [User]/[Human] bleed patterns.
-        // Once a bleed sentinel is detected, we stop forwarding further deltas.
-        let accumulated = "";
-        let bleedDetected = false;
-        // Longest sentinel we watch for, so we know how much tail to hold back
-        const BLEED_SENTINELS = ["\n[User]", "\n[Human]", "\nHuman:"];
-        const MAX_SENTINEL_LEN = Math.max(...BLEED_SENTINELS.map((s) => s.length));
-        /**
-         * Write a delta chunk to the SSE stream.
-         */
+        const bleed = hasTools ? null : new BleedDetector();
+        let toolBuffer = "";
         function writeDelta(text) {
             if (!text || res.writableEnded)
                 return;
@@ -103,66 +98,20 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
             isFirst = false;
         }
-        /**
-         * Process an incoming delta with bleed detection.
-         * We keep a tail buffer (MAX_SENTINEL_LEN chars) unwritten until we're
-         * sure it doesn't start a bleed pattern — this prevents partial sentinels
-         * (split across two deltas) from leaking through.
-         */
-        function processDelta(incoming) {
-            if (bleedDetected || res.writableEnded)
-                return;
-            accumulated += incoming;
-            // Check if the accumulated text contains a bleed sentinel
-            const safe = stripAssistantBleed(accumulated);
-            if (safe.length < accumulated.length) {
-                // Bleed found — write the safe portion and stop
-                bleedDetected = true;
-                // Only write the part we haven't written yet
-                const alreadyWritten = accumulated.length - incoming.length;
-                const safeNew = safe.slice(alreadyWritten);
-                if (safeNew)
-                    writeDelta(safeNew);
-                console.error("[Stream] Bleed detected — halting delta stream");
-                return;
-            }
-            // No bleed yet, but hold back the last MAX_SENTINEL_LEN chars as a
-            // look-ahead buffer in case a sentinel straddles two delta chunks.
-            const safeLen = Math.max(0, accumulated.length - MAX_SENTINEL_LEN);
-            const alreadyFlushed = accumulated.length - incoming.length;
-            const toFlush = safeLen - alreadyFlushed;
-            if (toFlush > 0) {
-                writeDelta(accumulated.slice(alreadyFlushed, alreadyFlushed + toFlush));
-            }
+        function writeSSE(obj) {
+            res.write(`data: ${JSON.stringify(obj)}\n\n`);
         }
-        /**
-         * Flush remaining buffered tail at end of stream.
-         * Run through stripAssistantBleed one more time for safety.
-         */
-        function flushTail() {
-            if (bleedDetected || res.writableEnded)
-                return;
-            const alreadyFlushed = Math.max(0, accumulated.length - MAX_SENTINEL_LEN);
-            const tail = accumulated.slice(alreadyFlushed);
-            if (!tail)
-                return;
-            const safe = stripAssistantBleed(accumulated).slice(alreadyFlushed);
-            if (safe)
-                writeDelta(safe);
-        }
-        // ──────────────────────────────────────────────────────────
         // Handle client disconnect
         res.on("close", () => {
             if (!isComplete)
                 subprocess.kill();
             resolve();
         });
-        // Log tool calls
+        // Log native tool calls from the CLI
         subprocess.on("message", (msg) => {
             if (msg.type !== "stream_event")
                 return;
-            const eventType = msg.event?.type;
-            if (eventType === "content_block_start") {
+            if (msg.event?.type === "content_block_start") {
                 const block = msg.event.content_block;
                 if (block?.type === "tool_use" && block.name) {
                     console.error(`[Stream] Tool call: ${block.name}`);
@@ -173,91 +122,81 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
         subprocess.on("assistant", (message) => {
             lastModel = message.message.model;
         });
-        if (hasTools) {
-            // ── Tool mode: buffer full response, parse tool calls at the end ──
-            // We cannot stream incrementally because <tool_call> markers may span
-            // multiple delta chunks. Buffer everything and emit synthesized chunks.
-            let toolBuffer = "";
-            subprocess.on("content_delta", (event) => {
-                toolBuffer += event.event.delta?.text || "";
-            });
-            subprocess.on("result", (_result) => {
-                isComplete = true;
-                // Apply bleed strip then parse tool calls
+        // ── Content delta ──────────────────────────────────────────
+        subprocess.on("content_delta", (event) => {
+            const text = event.event.delta?.text || "";
+            if (!text)
+                return;
+            if (hasTools) {
+                toolBuffer += text;
+            }
+            else {
+                const out = bleed.push(text);
+                if (out)
+                    writeDelta(out);
+            }
+        });
+        // ── Result ─────────────────────────────────────────────────
+        subprocess.on("result", (_result) => {
+            isComplete = true;
+            if (res.writableEnded) {
+                resolve();
+                return;
+            }
+            if (hasTools) {
+                // Buffer is complete — strip bleed then parse tool calls
                 const safeText = stripAssistantBleed(toolBuffer);
                 const { hasToolCalls, toolCalls, textWithoutToolCalls } = parseToolCalls(safeText);
-                if (!res.writableEnded) {
-                    if (hasToolCalls) {
-                        // Emit synthesized tool call SSE chunks
-                        const chunks = createToolCallChunks(toolCalls, requestId, lastModel);
-                        for (const chunk of chunks) {
-                            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                        }
+                if (hasToolCalls) {
+                    // Emit synthesized tool call SSE chunks
+                    for (const chunk of createToolCallChunks(toolCalls, requestId, lastModel)) {
+                        writeSSE(chunk);
                     }
-                    else {
-                        // No tool calls — emit full text as a single content chunk
-                        if (textWithoutToolCalls) {
-                            writeDelta(textWithoutToolCalls);
-                        }
-                        const doneChunk = createDoneChunk(requestId, lastModel);
-                        res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
-                    }
-                    res.write("data: [DONE]\n\n");
-                    res.end();
                 }
-                resolve();
-            });
-        }
-        else {
-            // ── Normal mode: stream deltas through bleed detection ────────────
-            subprocess.on("content_delta", (event) => {
-                const text = event.event.delta?.text || "";
-                if (!text)
-                    return;
-                processDelta(text);
-            });
-            subprocess.on("result", (_result) => {
-                isComplete = true;
-                flushTail();
-                if (!res.writableEnded) {
-                    // Send final done chunk with finish_reason
-                    const doneChunk = createDoneChunk(requestId, lastModel);
-                    res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
-                    res.write("data: [DONE]\n\n");
-                    res.end();
+                else {
+                    // No tool calls — emit full text as a single content chunk
+                    if (textWithoutToolCalls)
+                        writeDelta(textWithoutToolCalls);
+                    writeSSE(createDoneChunk(requestId, lastModel));
                 }
-                resolve();
-            });
-        }
+            }
+            else {
+                // Flush the bleed-detection tail buffer
+                const tail = bleed.flush();
+                if (tail)
+                    writeDelta(tail);
+                writeSSE(createDoneChunk(requestId, lastModel));
+            }
+            res.write("data: [DONE]\n\n");
+            res.end();
+            resolve();
+        });
+        // ── Error / Close ──────────────────────────────────────────
         subprocess.on("error", (error) => {
             console.error("[Streaming] Error:", error.message);
             if (!res.writableEnded) {
-                res.write(`data: ${JSON.stringify({
-                    error: { message: error.message, type: "server_error", code: null },
-                })}\n\n`);
+                writeSSE({ error: { message: error.message, type: "server_error", code: null } });
                 res.end();
             }
             resolve();
         });
         subprocess.on("close", (code) => {
-            // Subprocess exited - ensure response is closed
             if (!res.writableEnded) {
                 if (code !== 0 && !isComplete) {
-                    // Abnormal exit without result - send error
-                    res.write(`data: ${JSON.stringify({
+                    writeSSE({
                         error: {
                             message: `Process exited with code ${code}`,
                             type: "server_error",
                             code: null,
                         },
-                    })}\n\n`);
+                    });
                 }
                 res.write("data: [DONE]\n\n");
                 res.end();
             }
             resolve();
         });
-        // Start the subprocess with session-aware options
+        // Start the subprocess
         subprocess.start(cliInput.prompt, subOpts).catch((err) => {
             console.error("[Streaming] Subprocess start error:", err);
             reject(err);
@@ -300,7 +239,6 @@ async function handleNonStreamingResponse(res, subprocess, cliInput, requestId, 
             }
             resolve();
         });
-        // Start the subprocess with session-aware options
         subprocess.start(cliInput.prompt, subOpts).catch((error) => {
             res.status(500).json({
                 error: { message: error.message, type: "server_error", code: null },
@@ -313,14 +251,15 @@ async function handleNonStreamingResponse(res, subprocess, cliInput, requestId, 
  * Handle GET /v1/models — Returns available models
  */
 export function handleModels(_req, res) {
+    const created = Math.floor(Date.now() / 1000);
     res.json({
         object: "list",
-        data: [
-            { id: "claude-opus-4", object: "model", owned_by: "anthropic", created: Math.floor(Date.now() / 1000) },
-            { id: "claude-sonnet-4-6", object: "model", owned_by: "anthropic", created: Math.floor(Date.now() / 1000) },
-            { id: "claude-sonnet-4", object: "model", owned_by: "anthropic", created: Math.floor(Date.now() / 1000) },
-            { id: "claude-haiku-4", object: "model", owned_by: "anthropic", created: Math.floor(Date.now() / 1000) },
-        ],
+        data: AVAILABLE_MODELS.map((m) => ({
+            id: m.id,
+            object: "model",
+            owned_by: "anthropic",
+            created,
+        })),
     });
 }
 /**

@@ -1,8 +1,6 @@
 import { stripAssistantBleed } from "../adapter/openai-to-cli.js";
-
 const BLEED_SENTINELS = ["\n[User]", "\n[Human]", "\nHuman:"];
 const MAX_SENTINEL_LEN = Math.max(...BLEED_SENTINELS.map((s) => s.length));
-
 /**
  * Streaming bleed detector.
  *
@@ -21,43 +19,40 @@ const MAX_SENTINEL_LEN = Math.max(...BLEED_SENTINELS.map((s) => s.length));
  */
 export class BleedDetector {
     /** Look-ahead buffer — bounded to MAX_SENTINEL_LEN chars after each flush. */
-    private tail = "";
-    private _bleedDetected = false;
-
-    get bleedDetected(): boolean {
+    tail = "";
+    _bleedDetected = false;
+    get bleedDetected() {
         return this._bleedDetected;
     }
-
     /**
      * Append incoming text and return the safe portion ready to be written.
      * Holds back the last MAX_SENTINEL_LEN chars as a look-ahead buffer so
      * sentinels split across two chunks are still caught.
      */
-    push(incoming: string): string {
-        if (this._bleedDetected) return "";
-
+    push(incoming) {
+        if (this._bleedDetected)
+            return "";
         this.tail += incoming;
-
         const safe = stripAssistantBleed(this.tail);
         if (safe.length < this.tail.length) {
             this._bleedDetected = true;
             console.error("[Stream] Bleed detected — halting delta stream");
             return safe;
         }
-
         const flushUpTo = Math.max(0, this.tail.length - MAX_SENTINEL_LEN);
-        if (flushUpTo === 0) return "";
-
+        if (flushUpTo === 0)
+            return "";
         const out = this.tail.slice(0, flushUpTo);
         this.tail = this.tail.slice(flushUpTo);
         return out;
     }
-
     /**
      * Flush the remaining buffered tail. Call exactly once when the stream ends.
      */
-    flush(): string {
-        if (this._bleedDetected) return "";
+    flush() {
+        if (this._bleedDetected)
+            return "";
         return stripAssistantBleed(this.tail);
     }
 }
+//# sourceMappingURL=bleed-detector.js.map

@@ -104,7 +104,7 @@ async function handleStreamingResponse(
         let isComplete = false;
         let isFirst = true;
 
-        const bleed = new BleedDetector();
+        const bleed = hasTools ? null : new BleedDetector();
         let toolBuffer = "";
 
         function writeDelta(text: string): void {
@@ -160,7 +160,7 @@ async function handleStreamingResponse(
             if (hasTools) {
                 toolBuffer += text;
             } else {
-                const out = bleed.push(text);
+                const out = bleed!.push(text);
                 if (out) writeDelta(out);
             }
         });
@@ -188,7 +188,7 @@ async function handleStreamingResponse(
                 }
             } else {
                 // Flush the bleed-detection tail buffer
-                const tail = bleed.flush();
+                const tail = bleed!.flush();
                 if (tail) writeDelta(tail);
                 writeSSE(createDoneChunk(requestId, lastModel));
             }
