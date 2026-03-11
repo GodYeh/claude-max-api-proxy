@@ -165,7 +165,7 @@ export function cliResultToOpenai(
     result: ClaudeCliResult,
     requestId: string
 ): OpenAIChatResponse {
-    const modelName = result.modelUsage
+    const modelName = (result.modelUsage && Object.keys(result.modelUsage)[0])
         ? Object.keys(result.modelUsage)[0]
         : "claude-sonnet-4";
 
@@ -213,6 +213,7 @@ export function cliResultToOpenai(
  * Normalize Claude model names by stripping date suffixes.
  * e.g., "claude-sonnet-4-6-20250929" -> "claude-sonnet-4-6"
  */
-function normalizeModelName(model: string): string {
+function normalizeModelName(model: string | undefined): string {
+    if (!model || typeof model !== "string") return "claude-sonnet-4";
     return model.replace(/-\d{8}$/, "");
 }

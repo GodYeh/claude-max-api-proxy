@@ -128,7 +128,7 @@ export function createDoneChunk(requestId, model) {
  * Automatically detects and parses tool calls from the result text.
  */
 export function cliResultToOpenai(result, requestId) {
-    const modelName = result.modelUsage
+    const modelName = (result.modelUsage && Object.keys(result.modelUsage)[0])
         ? Object.keys(result.modelUsage)[0]
         : "claude-sonnet-4";
     const { hasToolCalls, toolCalls, textWithoutToolCalls } = parseToolCalls(result.result ?? "");
@@ -171,6 +171,8 @@ export function cliResultToOpenai(result, requestId) {
  * e.g., "claude-sonnet-4-5-20250929" -> "claude-sonnet-4"
  */
 function normalizeModelName(model) {
+    if (!model || typeof model !== "string")
+        return "claude-sonnet-4";
     if (model.includes("opus"))
         return "claude-opus-4";
     if (model.includes("sonnet"))
