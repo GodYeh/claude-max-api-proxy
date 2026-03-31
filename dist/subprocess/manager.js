@@ -133,6 +133,13 @@ export class ClaudeSubprocess extends EventEmitter {
             options.model,
             "--dangerously-skip-permissions",
         ];
+        // When external tools are provided, disable CLI's built-in tools
+        // so the model outputs <tool_call> markers instead of executing
+        // tools internally. The calling framework (e.g. Hermes) handles
+        // tool execution on its side.
+        if (options.hasExternalTools) {
+            args.push("--tools", "");
+        }
         // Pass system prompt as a native CLI flag
         if (options.systemPrompt) {
             args.push("--system-prompt", options.systemPrompt);

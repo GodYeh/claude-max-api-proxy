@@ -253,6 +253,7 @@ export async function handleChatCompletions(req, res) {
         const hasTools = Array.isArray(body.tools) &&
             body.tools.length > 0 &&
             body.tool_choice !== "none";
+        subOpts.hasExternalTools = hasTools;
         if (stream) {
             await handleStreamingResponse(req, res, subprocess, cliInput, requestId, subOpts, hasTools);
         }
