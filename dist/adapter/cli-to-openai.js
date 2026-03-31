@@ -1,4 +1,21 @@
 // ─── Tool call parsing ──────────────────────────────────────────────
+
+// Map Claude Code CLI tool names to standard tool names used by external
+// frameworks (e.g. Hermes Agent). When the CLI executes tools internally,
+// it uses its own names (Bash, Read, Write, etc.) which may not match
+// the tool definitions the client originally sent.
+const TOOL_NAME_MAP = {
+    "Bash": "terminal",
+    "Read": "read_file",
+    "Write": "write_file",
+    "Edit": "patch",
+    "Glob": "search_files",
+    "Grep": "search_files",
+    "WebFetch": "web_fetch",
+    "WebSearch": "web_search",
+    "Agent": "delegate_task",
+};
+
 const TOOL_CALL_RE = /<tool_call>([\s\S]*?)<\/tool_call>/g;
 /**
  * Parse <tool_call>...</tool_call> markers out of the full response text.
@@ -22,7 +39,7 @@ export function parseToolCalls(text) {
                 id: parsed.id || `call_${toolCalls.length + 1}`,
                 type: "function",
                 function: {
-                    name: String(parsed.name || "unknown"),
+                    name: TOOL_NAME_MAP[parsed.name] || String(parsed.name || "unknown"),
                     // Normalize: OpenAI requires arguments as a JSON string
                     arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
                 },
