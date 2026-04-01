@@ -408,11 +408,16 @@ export function extractSystemPrompt(messages, tools) {
     const base = systemParts.join("\n\n") || "";
     // Sanitize OpenClaw-specific directives that confuse CLI
     const sanitized = sanitizeSystemPrompt(base);
-    // Append CLI tool instruction to ensure native tool usage
-    let prompt = sanitized + CLI_TOOL_INSTRUCTION;
-    // Append external tool schema if provided
+    let prompt;
     if (tools && tools.length > 0) {
-        prompt += serializeToolsToPrompt(tools);
+        // External tools provided (e.g. Hermes Agent) — use <tool_call> marker path.
+        // Do NOT inject CLI native tool instructions, which would override the
+        // external tool schema and cause the model to use Bash/Read/Write directly
+        // instead of emitting parseable <tool_call> markers.
+        prompt = sanitized + serializeToolsToPrompt(tools);
+    } else {
+        // No external tools — use CLI native tool instruction
+        prompt = sanitized + CLI_TOOL_INSTRUCTION;
     }
     return prompt.trim() || null;
 }
