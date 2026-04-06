@@ -465,7 +465,7 @@ export function extractSystemPrompt(
 ): string | null {
     const systemParts: string[] = [];
     for (const msg of messages) {
-        if (msg.role === "system") {
+        if (msg.role === "system" || msg.role === "developer") {
             systemParts.push(extractText(msg.content));
         }
     }
@@ -500,7 +500,7 @@ export function messagesToPrompt(
     messages: OpenAIChatMessage[],
     hasExternalTools = false
 ): string {
-    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system" && msg.role !== "developer");
     const parts: string[] = [];
 
     for (const msg of nonSystemMessages) {
