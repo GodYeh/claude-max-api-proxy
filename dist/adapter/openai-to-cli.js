@@ -401,7 +401,7 @@ ${toolsJson}
 export function extractSystemPrompt(messages, tools) {
     const systemParts = [];
     for (const msg of messages) {
-        if (msg.role === "system") {
+        if (msg.role === "system" || msg.role === "developer") {
             systemParts.push(extractText(msg.content));
         }
     }
@@ -431,7 +431,7 @@ export function extractSystemPrompt(messages, tools) {
  *   When false, both are skipped (CLI handles tools internally).
  */
 export function messagesToPrompt(messages, hasExternalTools = false) {
-    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system" && msg.role !== "developer");
     const parts = [];
     for (const msg of nonSystemMessages) {
         const text = extractText(msg.content);

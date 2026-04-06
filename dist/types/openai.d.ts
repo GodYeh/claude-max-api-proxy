@@ -33,7 +33,7 @@ export interface OpenAIToolCallDelta {
     };
 }
 export interface OpenAIChatMessage {
-    role: "system" | "user" | "assistant" | "tool";
+    role: "system" | "developer" | "user" | "assistant" | "tool";
     /** null is valid for assistant messages that are pure tool calls */
     content: string | null | Array<{
         type: string;
