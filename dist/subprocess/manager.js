@@ -9,7 +9,16 @@ import { EventEmitter } from "events";
 import path from "path";
 import fs from "fs";
 import { isAssistantMessage, isResultMessage, isContentDelta, } from "../types/claude-cli.js";
-const PROXY_CWD = path.join(process.env.HOME || "/tmp", ".openclaw", "workspace");
+// Spawn Claude CLI subprocesses from $HOME so that Claude Code's
+// project-scoped settings hierarchy resolves the user's
+// ~/.claude/settings.local.json allowlist. Spawning from any other
+// directory (including ~/.openclaw/workspace) makes Claude Code look
+// for a non-existent project-local settings file and fall back to
+// ~/.claude/settings.json — which typically has no permissions section,
+// causing every Bash invocation to be gated. See incident notes
+// 2026-04-07: Apr 3 Claude CLI release tightened the settings lookup
+// to project-root-only, which broke proxy-spawned subprocesses.
+const PROXY_CWD = process.env.HOME || "/tmp";
 // ── Gateway token resolution ────────────────────────────────────
 // Read OPENCLAW_GATEWAY_TOKEN from openclaw.json if not in env.
 // This enables oc-tool (cross-channel messaging, browser, cron, etc.)
