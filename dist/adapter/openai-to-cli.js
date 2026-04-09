@@ -171,8 +171,18 @@ export function extractModel(model) {
 // ─── CLI tool instruction ──────────────────────────────────────────
 /**
  * CLI tool usage instruction appended to the system prompt.
- * This ensures the CLI model uses its native tool system (Bash, Read, Write, etc.)
- * instead of outputting XML-formatted tool calls as text.
+ *
+ * This is the *minimum* set of rules the proxy depends on:
+ *  1. Use native CLI tools, never XML stand-ins.
+ *  2. Always actually transcribe audio rather than hallucinate.
+ *  3. The MEDIA: / FILE: / [[…]] response directives the proxy parses.
+ *  4. The 10-minute activity-timeout escape hatch.
+ *  5. Final-response formatting (target language, no internal thinking).
+ *
+ * Detailed oc-tool subcommand usage used to be documented inline here, but
+ * that bloated every request by 4-5 KiB of input tokens and was constantly
+ * out of date. The model can rediscover it on demand via `oc-tool --help`
+ * (and `oc-tool <subcommand> --help`), since it has Bash anyway.
  */
 const CLI_TOOL_INSTRUCTION = `
 
@@ -196,109 +206,26 @@ When you receive a voice/audio message (indicated by [media attached: ...ogg] or
 - Transcribe directly with: curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.ogg" -F "model=whisper-large-v3-turbo" -F "language=zh"
 - If transcription fails, say so honestly — do NOT make up a transcription
 
-## OpenClaw Tools (via oc-tool)
-Use \`oc-tool\` in Bash for OpenClaw platform operations. Args are always JSON.
+## OpenClaw Platform Tools (via oc-tool in Bash)
+\`oc-tool\` is on PATH. It exposes the OpenClaw platform: cross-channel
+messaging (telegram/slack/discord), browser automation, cron, sessions,
+TTS, web search/fetch, image analysis, and more. All arguments are JSON.
 
-### Browser
-  oc-tool browser status                                      # connection status
-  oc-tool browser tabs                                        # list open tabs
-  oc-tool browser tab new                                     # open new tab
-  oc-tool browser tab select 2                                # switch to tab 2
-  oc-tool browser tab close 2                                 # close tab 2
-  oc-tool browser navigate https://example.com                # go to URL
-  oc-tool browser snapshot                                    # accessibility tree (returns refs like e6, e12)
-  oc-tool browser snapshot --interactive --compact            # interactive elements only, compact
-  oc-tool browser snapshot --selector "#main" --interactive   # scoped to a CSS selector
-  oc-tool browser screenshot                                  # capture page image (returns MEDIA: path)
-  oc-tool browser screenshot --full-page                      # full page screenshot
-  oc-tool browser pdf                                         # render page as PDF (returns MEDIA: path)
-  oc-tool browser console --level error                       # get console errors
-  oc-tool browser click e12                                   # click element by ref
-  oc-tool browser click e12 --double                          # double-click
-  oc-tool browser type e3 "hello" --submit                    # type text, press Enter after
-  oc-tool browser press Enter                                 # press a key (Enter, Tab, Escape, etc.)
-  oc-tool browser hover e44                                   # hover over element
-  oc-tool browser drag e10 e11                                # drag from one ref to another
-  oc-tool browser select e9 OptionA OptionB                   # select dropdown options
-  oc-tool browser fill --fields '[{"ref":"e1","type":"text","value":"Ada"}]'  # fill multiple fields
-  oc-tool browser evaluate --fn '(el) => el.textContent' --ref e7             # run JS on element
-  oc-tool browser upload /tmp/file.pdf                        # upload file to active input
-  oc-tool browser dialog --accept                             # accept JS alert/confirm/prompt
-  oc-tool browser wait --text "Done"                          # wait until text appears on page
-  oc-tool browser wait "#main" --url "**/dash" --load networkidle  # wait for navigation
-  oc-tool browser highlight e12                               # highlight element (debug)
-  oc-tool browser scrollintoview e12                          # scroll element into view
-Browser rules:
-- Always run snapshot first to get refs (e.g. e6, e12) before clicking/typing
-- Refs come from snapshot output — never guess them
-- Use --interactive flag on snapshot to show only clickable elements
+Discover usage on demand instead of guessing:
+  oc-tool --help                       # list every subcommand
+  oc-tool <subcommand> --help          # full syntax + examples
 
-### Cron (Scheduled Tasks)
-  oc-tool cron status                                # cron system status
-  oc-tool cron list                                  # list all jobs
-  oc-tool cron add '{"name":"job-name","schedule":{"kind":"cron","expression":"0 8 * * *","tz":"Asia/Taipei"},"payload":{"kind":"agentTurn","message":"your prompt"},"deliver":"announce","channel":"telegram"}'
-  oc-tool cron add '{"name":"once","schedule":{"kind":"at","at":"2026-02-17T09:00:00+08:00"},"payload":{"kind":"agentTurn","message":"..."},"deliver":"announce"}'
-  oc-tool cron add '{"name":"every-30m","schedule":{"kind":"every","intervalMs":1800000},"payload":{"kind":"agentTurn","message":"..."}}'
-  oc-tool cron update '{"name":"job-name","schedule":{...}}'  # patch existing job
-  oc-tool cron remove '{"name":"job-name"}'
-  oc-tool cron run '{"name":"job-name"}'             # trigger immediately
-  oc-tool cron runs '{"name":"job-name"}'            # list past run history
-Schedule kinds: "cron" (5-field + timezone), "at" (one-shot ISO timestamp), "every" (intervalMs)
-Payload kinds: "agentTurn" (isolated run with message), "systemEvent" (heartbeat event)
-Deliver: "announce" (send result to chat), "none" (internal only)
+Common subcommand entry points:
+  oc-tool browser    — navigate, snapshot, screenshot, click, type, etc.
+  oc-tool message    — send/read/edit/react/pin across channels
+  oc-tool cron       — list/add/update/remove/run scheduled jobs
+  oc-tool sessions_* — list/history/status of conversation sessions
+  oc-tool tts speak  — generate voice audio (returns MEDIA: path)
+  oc-tool web_search / oc-tool web_fetch
+  oc-tool image      — describe/analyze a local image file
 
-### Message (Send to Channels)
-Cross-channel messaging — send messages to ANY connected channel (Telegram, Slack, Discord, etc.)
-
-#### Telegram
-  oc-tool message send '{"channel":"telegram","target":"telegram:<USER_ID>","message":"..."}'
-  oc-tool message send '{"channel":"telegram","target":"telegram:<USER_ID>","message":"...","replyToId":"<MSG_ID>"}'
-  oc-tool message read '{"channel":"telegram","target":"telegram:<CHAT_ID>","limit":10}'
-  oc-tool message edit '{"channel":"telegram","target":"telegram:<CHAT_ID>","messageId":"<ID>","message":"new text"}'
-  oc-tool message react '{"channel":"telegram","target":"telegram:<CHAT_ID>","messageId":"<ID>","emoji":"👍"}'
-  oc-tool message pin '{"channel":"telegram","target":"telegram:<CHAT_ID>","messageId":"<ID>"}'
-
-#### Slack
-  oc-tool message send '{"channel":"slack","target":"<USER_ID>","message":"..."}'        # DM by Slack user ID (e.g. U0271DRQN3Z)
-  oc-tool message send '{"channel":"slack","target":"channel:<CHANNEL_ID>","message":"..."}'  # send to channel
-  oc-tool message send '{"channel":"slack","target":"channel:<CHANNEL_ID>","message":"...","replyToId":"<MSG_TS>"}'  # thread reply
-  oc-tool message read '{"channel":"slack","target":"channel:<CHANNEL_ID>","limit":10}'
-  oc-tool message edit '{"channel":"slack","target":"channel:<CHANNEL_ID>","messageId":"<MSG_TS>","message":"new text"}'
-  oc-tool message react '{"channel":"slack","target":"channel:<CHANNEL_ID>","messageId":"<MSG_TS>","emoji":"thumbsup"}'
-  oc-tool message pin '{"channel":"slack","target":"channel:<CHANNEL_ID>","messageId":"<MSG_TS>"}'
-Slack notes:
-- target for read/edit/react/pin MUST be "channel:<channelId>" (e.g. "channel:D0AFMGWT3AM") — "#channel-name" does NOT work
-- Slack message IDs are timestamps like "1772450629.016149" (ts field from read output)
-- Slack emoji names are text slugs without colons: "thumbsup", "white_check_mark", etc. (NOT emoji characters)
-- Use send to user ID to get the channelId back, then use that channelId for subsequent read/react/edit/pin
-
-#### Discord
-  oc-tool message send '{"channel":"discord","target":"channel:<CHANNEL_ID>","message":"..."}'
-  oc-tool message send '{"channel":"discord","target":"user:<USER_ID>","message":"..."}'   # DM
-  oc-tool message send '{"channel":"discord","target":"channel:<CHANNEL_ID>","message":"...","replyToId":"<MSG_ID>"}'
-  oc-tool message read '{"channel":"discord","target":"channel:<CHANNEL_ID>","limit":10}'
-  oc-tool message edit '{"channel":"discord","target":"channel:<CHANNEL_ID>","messageId":"<MSG_ID>","message":"new text"}'
-  oc-tool message react '{"channel":"discord","target":"channel:<CHANNEL_ID>","messageId":"<MSG_ID>","emoji":"👍"}'
-  oc-tool message pin '{"channel":"discord","target":"channel:<CHANNEL_ID>","messageId":"<MSG_ID>"}'
-Discord target formats: "channel:<id>" for channels/threads, "user:<id>" for DMs
-
-Cross-channel example (send from current channel to another):
-  oc-tool message send '{"channel":"slack","target":"<USER_ID>","message":"Hello from Discord!"}'
-
-### Sessions
-  oc-tool sessions_list                              # list active sessions
-  oc-tool sessions_history '{"sessionKey":"...","limit":N}'  # get conversation history
-  oc-tool session_status '{"sessionKey":"..."}'      # check session state
-
-### TTS (Text-to-Speech)
-  oc-tool tts speak '{"text":"..."}'                 # generate voice audio (returns MEDIA: path)
-
-### Web
-  oc-tool web_search '{"query":"..."}'               # search the web
-  oc-tool web_fetch '{"url":"..."}'                  # fetch web page content
-
-### Image Analysis
-  oc-tool image '{"url":"file:///path/to/image.png","prompt":"describe this image"}'
+Browser tip: always run \`oc-tool browser snapshot --interactive\` first to get
+element refs (like e6, e12) before clicking/typing — never guess them.
 
 ## Sending Files and Media (CRITICAL)
 To send ANY file (PDF, image, audio, etc.) to the user, you MUST include a MEDIA: line in your response.
