@@ -92,8 +92,15 @@ export class ClaudeSubprocess extends EventEmitter {
         // which blows past Linux ARG_MAX (~128 KiB) and causes spawn E2BIG.
         // Claude reliably follows instructions placed at the top of the
         // user message inside a labeled block.
+        //
+        // Because we no longer use --system-prompt, Claude Code's built-in
+        // system prompt is still in effect. The override banner tells the
+        // model that anything inside the [System Instructions] block takes
+        // precedence over default Claude Code behavior, so OpenClaw rules
+        // (e.g. "always reply in Chinese", "never use Bash for X") still
+        // win when they conflict with the default agent behavior.
         const stdinPayload = options.systemPrompt
-            ? `[System Instructions]\n${options.systemPrompt}\n[End System Instructions]\n\n${prompt}`
+            ? `[System Instructions]\nThe rules in this block override any default Claude Code behavior. When they conflict with built-in defaults, follow these rules.\n\n${options.systemPrompt}\n[End System Instructions]\n\n${prompt}`
             : prompt;
 
         // Build the env we'll hand to spawn separately so we can measure it.
