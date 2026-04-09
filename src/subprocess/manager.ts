@@ -129,7 +129,19 @@ export class ClaudeSubprocess extends EventEmitter {
                 `stdin=${stdinBytes}B (prompt=${promptBytes}B systemPrompt=${sysPromptBytes}B)`,
         );
 
-        return new Promise((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
+            // Settle once: we either resolve on the spawn handshake or reject
+            // on a spawn error, but never both. After the start() promise has
+            // resolved, any further child errors are surfaced as ClaudeSubprocess
+            // 'error' events instead so consumers can handle them in-stream.
+            let settled = false;
+            const wrapSpawnError = (err: Error): Error =>
+                err.message.includes("ENOENT")
+                    ? new Error(
+                          "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+                      )
+                    : err;
+
             try {
                 // Use spawn() for security - no shell interpretation
                 this.process = spawn("claude", args, {
@@ -142,17 +154,32 @@ export class ClaudeSubprocess extends EventEmitter {
                 this.activityTimeout = ACTIVITY_TIMEOUT;
                 this.resetActivityTimeout();
 
-                // Handle spawn errors (e.g., claude not found)
+                // The 'spawn' event fires once the child has actually been
+                // forked. Defer resolving start() until then so async spawn
+                // errors (e.g. ENOENT) reach the caller as a real rejection
+                // instead of being silently swallowed by an already-resolved
+                // promise.
+                this.process.once("spawn", () => {
+                    if (settled) return;
+                    settled = true;
+                    console.error(
+                        `[Subprocess] Process spawned with PID: ${this.process?.pid} (${stdinBytes} bytes via stdin)`
+                    );
+                    resolve();
+                });
+
+                // Handle child errors. Before the start() promise has settled,
+                // surface them as a rejection so the HTTP layer can produce a
+                // proper 5xx. After settling, re-emit them so streaming
+                // consumers can react in-band.
                 this.process.on("error", (err) => {
-                    this.clearTimeout();
-                    if (err.message.includes("ENOENT")) {
-                        reject(
-                            new Error(
-                                "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
-                            )
-                        );
+                    const wrapped = wrapSpawnError(err);
+                    if (!settled) {
+                        settled = true;
+                        this.clearTimeout();
+                        reject(wrapped);
                     } else {
-                        reject(err);
+                        this.emit("error", wrapped);
                     }
                 });
 
@@ -167,9 +194,6 @@ export class ClaudeSubprocess extends EventEmitter {
                     });
                     stdin.end(stdinPayload, "utf8");
                 }
-                console.error(
-                    `[Subprocess] Process spawned with PID: ${this.process.pid} (${stdinBytes} bytes via stdin)`
-                );
 
                 // Parse JSON stream from stdout
                 this.process.stdout?.on("data", (chunk: Buffer) => {
@@ -206,12 +230,13 @@ export class ClaudeSubprocess extends EventEmitter {
                     }
                     this.emit("close", code);
                 });
-
-                // Resolve immediately since we're streaming
-                resolve();
             } catch (err) {
-                this.clearTimeout();
-                reject(err);
+                // Synchronous spawn failures (e.g. EACCES, E2BIG) end up here.
+                if (!settled) {
+                    settled = true;
+                    this.clearTimeout();
+                    reject(err as Error);
+                }
             }
         });
     }
