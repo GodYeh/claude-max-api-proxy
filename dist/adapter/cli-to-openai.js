@@ -1,5 +1,3 @@
-// ─── Tool call parsing ──────────────────────────────────────────────
-const TOOL_CALL_RE = /<tool_call>([\s\S]*?)<\/tool_call>/g;
 /**
  * Parse <tool_call>...</tool_call> markers out of the full response text.
  *
@@ -12,9 +10,10 @@ const TOOL_CALL_RE = /<tool_call>([\s\S]*?)<\/tool_call>/g;
  */
 export function parseToolCalls(text) {
     const toolCalls = [];
-    // Reset lastIndex since the regex is module-level with /g flag
-    TOOL_CALL_RE.lastIndex = 0;
-    const textWithoutToolCalls = text.replace(TOOL_CALL_RE, (_, inner) => {
+    // Local regex instance: a module-level /g RegExp shares lastIndex across
+    // all callers, which is unsafe under concurrent requests.
+    const re = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+    const textWithoutToolCalls = text.replace(re, (_, inner) => {
         try {
             const parsed = JSON.parse(inner.trim());
             const args = parsed.arguments;
