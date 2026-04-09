@@ -221,14 +221,13 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
                 const { hasToolCalls, toolCalls, textWithoutToolCalls } = parseToolCalls(safeText);
                 if (!res.writableEnded) {
                     if (hasToolCalls) {
-                        // Emit synthesized tool call SSE chunks
+                        // Emit synthesized tool call SSE chunks. The chunks
+                        // already include a finish_reason:"tool_calls" terminator,
+                        // so we only need a single [DONE] sentinel after them.
                         const chunks = createToolCallChunks(toolCalls, requestId, lastModel);
                         for (const chunk of chunks) {
                             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
                         }
-                        // Use [DONE] as the sole end signal for tool call responses
-                        // (tool call chunks already have finish_reason:"tool_calls")
-                        res.write("data: [DONE]\n\n");
                     }
                     else {
                         // No tool calls — emit full text as a single content chunk
