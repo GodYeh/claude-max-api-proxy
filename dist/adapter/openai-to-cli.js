@@ -8,8 +8,12 @@
 function extractText(content) {
     if (content === null || content === undefined)
         return "";
-    if (typeof content === "string")
-        return content;
+    if (typeof content === "string") {
+        // Some upstream serializers stringify null content as the literal
+        // four-letter word "null". Treat that as empty so callers don't
+        // need a separate guard.
+        return content === "null" ? "" : content;
+    }
     if (Array.isArray(content)) {
         return content
             .filter((c) => c.type === "text" && typeof c.text === "string")
@@ -469,7 +473,7 @@ export function messagesToPrompt(messages, hasExternalTools = false) {
                     break;
                 }
                 // Skip assistant messages that are purely tool_calls with no text
-                if (msg.tool_calls && (!text || text === "null"))
+                if (msg.tool_calls && !text)
                     break;
                 // Clean XML tool patterns to prevent CLI from mimicking them
                 const cleaned = cleanAssistantContent(text);

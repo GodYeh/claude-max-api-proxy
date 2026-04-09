@@ -63,7 +63,7 @@ export async function handleChatCompletions(req: Request, res: Response): Promis
             body.tool_choice !== "none";
 
         if (stream) {
-            await handleStreamingResponse(req, res, subprocess, cliInput, requestId, subOpts, hasTools);
+            await handleStreamingResponse(res, subprocess, cliInput, requestId, subOpts, hasTools);
         } else {
             await handleNonStreamingResponse(res, subprocess, cliInput, requestId, subOpts);
         }
@@ -86,7 +86,6 @@ export async function handleChatCompletions(req: Request, res: Response): Promis
  * Each content_delta event is immediately written to the response stream.
  */
 async function handleStreamingResponse(
-    req: Request,
     res: Response,
     subprocess: ClaudeSubprocess,
     cliInput: CliInput,
@@ -121,8 +120,6 @@ async function handleStreamingResponse(
     return new Promise<void>((resolve, reject) => {
         let lastModel = "claude-sonnet-4";
         let isComplete = false;
-        let isFirst = false; // role:"assistant" already sent in the announce chunk above
-        let allContent = ""; // Track all content for auth error detection
 
         // ── Bleed detection state ──────────────────────────────────
         // We hold back a small tail buffer (MAX_SENTINEL_LEN bytes) so a
@@ -143,7 +140,9 @@ async function handleStreamingResponse(
         let authProbeCleared = false;
 
         /**
-         * Write a delta chunk to the SSE stream.
+         * Write a content delta chunk to the SSE stream.
+         * The role:"assistant" announcement was already sent up-front, so
+         * subsequent deltas only carry the content payload.
          */
         function writeDelta(text: string): void {
             if (!text || res.writableEnded) return;
@@ -154,15 +153,11 @@ async function handleStreamingResponse(
                 model: lastModel,
                 choices: [{
                     index: 0,
-                    delta: {
-                        role: isFirst ? ("assistant" as const) : undefined,
-                        content: text,
-                    },
+                    delta: { content: text },
                     finish_reason: null,
                 }],
             };
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            isFirst = false;
         }
 
         /**
@@ -316,7 +311,6 @@ async function handleStreamingResponse(
             subprocess.on("content_delta", (event: any) => {
                 const text = event.event.delta?.text || "";
                 toolBuffer += text;
-                allContent += text;
             });
 
             subprocess.on("result", (_result: any) => {
@@ -368,7 +362,6 @@ async function handleStreamingResponse(
             subprocess.on("content_delta", (event: any) => {
                 const text = event.event.delta?.text || "";
                 if (!text) return;
-                allContent += text;
                 ingestDelta(text);
             });
 

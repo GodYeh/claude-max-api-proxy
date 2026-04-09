@@ -42,7 +42,7 @@ export async function handleChatCompletions(req, res) {
             body.tools.length > 0 &&
             body.tool_choice !== "none";
         if (stream) {
-            await handleStreamingResponse(req, res, subprocess, cliInput, requestId, subOpts, hasTools);
+            await handleStreamingResponse(res, subprocess, cliInput, requestId, subOpts, hasTools);
         }
         else {
             await handleNonStreamingResponse(res, subprocess, cliInput, requestId, subOpts);
@@ -65,7 +65,7 @@ export async function handleChatCompletions(req, res) {
  *
  * Each content_delta event is immediately written to the response stream.
  */
-async function handleStreamingResponse(req, res, subprocess, cliInput, requestId, subOpts, hasTools = false) {
+async function handleStreamingResponse(res, subprocess, cliInput, requestId, subOpts, hasTools = false) {
     // Set SSE headers
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -92,8 +92,6 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
     return new Promise((resolve, reject) => {
         let lastModel = "claude-sonnet-4";
         let isComplete = false;
-        let isFirst = false; // role:"assistant" already sent in the announce chunk above
-        let allContent = ""; // Track all content for auth error detection
         // ── Bleed detection state ──────────────────────────────────
         // We hold back a small tail buffer (MAX_SENTINEL_LEN bytes) so a
         // bleed sentinel that straddles two delta chunks is still caught,
@@ -111,7 +109,9 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
         let authProbe = "";
         let authProbeCleared = false;
         /**
-         * Write a delta chunk to the SSE stream.
+         * Write a content delta chunk to the SSE stream.
+         * The role:"assistant" announcement was already sent up-front, so
+         * subsequent deltas only carry the content payload.
          */
         function writeDelta(text) {
             if (!text || res.writableEnded)
@@ -123,15 +123,11 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
                 model: lastModel,
                 choices: [{
                         index: 0,
-                        delta: {
-                            role: isFirst ? "assistant" : undefined,
-                            content: text,
-                        },
+                        delta: { content: text },
                         finish_reason: null,
                     }],
             };
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            isFirst = false;
         }
         /**
          * Process an incoming delta with bleed detection.
@@ -279,7 +275,6 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
             subprocess.on("content_delta", (event) => {
                 const text = event.event.delta?.text || "";
                 toolBuffer += text;
-                allContent += text;
             });
             subprocess.on("result", (_result) => {
                 isComplete = true;
@@ -329,7 +324,6 @@ async function handleStreamingResponse(req, res, subprocess, cliInput, requestId
                 const text = event.event.delta?.text || "";
                 if (!text)
                     return;
-                allContent += text;
                 ingestDelta(text);
             });
             subprocess.on("result", (_result) => {
