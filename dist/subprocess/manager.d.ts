@@ -27,7 +27,13 @@ export declare class ClaudeSubprocess extends EventEmitter {
      */
     start(prompt: string, options: SubprocessOptions): Promise<void>;
     /**
-     * Build CLI arguments array
+     * Build CLI arguments array.
+     *
+     * Note: neither the user prompt nor the system prompt is passed as argv —
+     * both are piped via stdin in start() (system prompt inlined as a labeled
+     * block at the top) to avoid E2BIG on long conversation histories or huge
+     * OpenClaw system prompts. claude --print reads stdin when no positional
+     * prompt is given.
      */
     private buildArgs;
     /**

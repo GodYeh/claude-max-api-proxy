@@ -296,7 +296,6 @@ async function handleStreamingResponse(
                 // Detect auth errors before forwarding
                 if (isAuthError(allContent)) {
                     console.error("[Stream] Auth error detected in CLI output");
-                    progress.cleanup().catch(() => {});
                     if (!res.writableEnded) {
                         res.write(`data: ${JSON.stringify({
                             error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
