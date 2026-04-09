@@ -55,7 +55,16 @@ function resolveGatewayToken(): string | null {
     return _gatewayToken;
 }
 
-const ACTIVITY_TIMEOUT = 600_000; // 10 minutes (no stdout activity = stuck)
+// Activity watchdog: if the CLI emits nothing on stdout *or* stderr for
+// this many milliseconds, we assume it is wedged and SIGTERM it. The default
+// is 10 minutes; tune via env for unusually long-running tools.
+const DEFAULT_ACTIVITY_TIMEOUT = 600_000;
+const ACTIVITY_TIMEOUT = (() => {
+    const raw = process.env.CLAUDE_PROXY_ACTIVITY_TIMEOUT_MS;
+    if (!raw) return DEFAULT_ACTIVITY_TIMEOUT;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ACTIVITY_TIMEOUT;
+})();
 
 export interface SubprocessOptions {
     model: ClaudeModel;
@@ -214,8 +223,12 @@ export class ClaudeSubprocess extends EventEmitter {
                     this.processBuffer();
                 });
 
-                // Capture stderr for debugging
+                // Capture stderr for debugging. stderr output also counts as
+                // activity — if the CLI is producing progress logs (or even
+                // tool execution traces) on stderr while waiting on something
+                // expensive, we should not kill it just because stdout is idle.
                 this.process.stderr?.on("data", (chunk: Buffer) => {
+                    this.resetActivityTimeout();
                     const errorText = chunk.toString().trim();
                     if (errorText) {
                         console.error(
