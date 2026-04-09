@@ -49,23 +49,48 @@ export class ClaudeSubprocess extends EventEmitter {
      * Start the Claude CLI subprocess with the given prompt
      */
     async start(prompt, options) {
-        const args = this.buildArgs(prompt, options);
+        const args = this.buildArgs(options);
+        // Inline the system prompt into stdin instead of passing it via
+        // --system-prompt. The OpenClaw system prompt can exceed 150 KB,
+        // which blows past Linux ARG_MAX (~128 KiB) and causes spawn E2BIG.
+        // Claude reliably follows instructions placed at the top of the
+        // user message inside a labeled block.
+        const stdinPayload = options.systemPrompt
+            ? `[System Instructions]\n${options.systemPrompt}\n[End System Instructions]\n\n${prompt}`
+            : prompt;
+        // Build the env we'll hand to spawn separately so we can measure it.
+        const childEnv = {
+            ...process.env,
+            CLAUDECODE: undefined,
+            // Ensure oc-tool is findable and can reach the gateway
+            PATH: [
+                path.join(process.env.HOME || "/tmp", ".openclaw", "bin"),
+                process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+            ].join(":"),
+            OPENCLAW_GATEWAY_TOKEN: resolveGatewayToken() ?? undefined,
+            OPENCLAW_GATEWAY_URL: process.env.OPENCLAW_GATEWAY_URL ?? "http://localhost:18789",
+        };
+        // Diagnostics: log argv + envp sizes so we can spot ARG_MAX (E2BIG) blowups.
+        // Linux ARG_MAX is typically 128 KiB and counts argv + envp combined.
+        const argvBytes = args.reduce((sum, a) => sum + Buffer.byteLength(a, "utf8") + 1, Buffer.byteLength("claude", "utf8") + 1);
+        const envpBytes = Object.entries(childEnv).reduce((sum, [k, v]) => {
+            if (v === undefined)
+                return sum;
+            return sum + Buffer.byteLength(`${k}=${v}`, "utf8") + 1;
+        }, 0);
+        const promptBytes = Buffer.byteLength(prompt, "utf8");
+        const sysPromptBytes = options.systemPrompt
+            ? Buffer.byteLength(options.systemPrompt, "utf8")
+            : 0;
+        const stdinBytes = Buffer.byteLength(stdinPayload, "utf8");
+        console.error(`[Subprocess] argv=${argvBytes}B envp=${envpBytes}B (sum=${argvBytes + envpBytes}B) ` +
+            `stdin=${stdinBytes}B (prompt=${promptBytes}B systemPrompt=${sysPromptBytes}B)`);
         return new Promise((resolve, reject) => {
             try {
                 // Use spawn() for security - no shell interpretation
                 this.process = spawn("claude", args, {
                     cwd: options.cwd || PROXY_CWD,
-                    env: {
-                        ...process.env,
-                        CLAUDECODE: undefined,
-                        // Ensure oc-tool is findable and can reach the gateway
-                        PATH: [
-                            path.join(process.env.HOME || "/tmp", ".openclaw", "bin"),
-                            process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-                        ].join(":"),
-                        OPENCLAW_GATEWAY_TOKEN: resolveGatewayToken() ?? undefined,
-                        OPENCLAW_GATEWAY_URL: process.env.OPENCLAW_GATEWAY_URL ?? "http://localhost:18789",
-                    },
+                    env: childEnv,
                     stdio: ["pipe", "pipe", "pipe"],
                 });
                 // Set activity timeout (resets on each stdout data)
@@ -81,9 +106,18 @@ export class ClaudeSubprocess extends EventEmitter {
                         reject(err);
                     }
                 });
-                // Close stdin since we pass prompt as argument
-                this.process.stdin?.end();
-                console.error(`[Subprocess] Process spawned with PID: ${this.process.pid}`);
+                // Pipe the prompt (and inlined system prompt) via stdin instead
+                // of argv to avoid E2BIG. Linux execve ARG_MAX is ~128 KiB and
+                // counts argv + envp combined; OpenClaw conversations + system
+                // prompts routinely exceed that on the command line.
+                const stdin = this.process.stdin;
+                if (stdin) {
+                    stdin.on("error", (err) => {
+                        console.error("[Subprocess] stdin error:", err.message);
+                    });
+                    stdin.end(stdinPayload, "utf8");
+                }
+                console.error(`[Subprocess] Process spawned with PID: ${this.process.pid} (${stdinBytes} bytes via stdin)`);
                 // Parse JSON stream from stdout
                 this.process.stdout?.on("data", (chunk) => {
                     const data = chunk.toString();
@@ -120,10 +154,16 @@ export class ClaudeSubprocess extends EventEmitter {
         });
     }
     /**
-     * Build CLI arguments array
+     * Build CLI arguments array.
+     *
+     * Note: neither the user prompt nor the system prompt is passed as argv —
+     * both are piped via stdin in start() (system prompt inlined as a labeled
+     * block at the top) to avoid E2BIG on long conversation histories or huge
+     * OpenClaw system prompts. claude --print reads stdin when no positional
+     * prompt is given.
      */
-    buildArgs(prompt, options) {
-        const args = [
+    buildArgs(options) {
+        return [
             "--print",
             "--output-format",
             "stream-json",
@@ -133,12 +173,6 @@ export class ClaudeSubprocess extends EventEmitter {
             options.model,
             "--dangerously-skip-permissions",
         ];
-        // Pass system prompt as a native CLI flag
-        if (options.systemPrompt) {
-            args.push("--system-prompt", options.systemPrompt);
-        }
-        args.push("--", prompt);
-        return args;
     }
     /**
      * Process the buffer and emit parsed messages
