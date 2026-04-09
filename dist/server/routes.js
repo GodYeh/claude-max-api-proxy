@@ -385,50 +385,67 @@ async function handleStreamingResponse(res, subprocess, cliInput, requestId, sub
 async function handleNonStreamingResponse(res, subprocess, cliInput, requestId, subOpts) {
     return new Promise((resolve) => {
         let finalResult = null;
+        // Each call to subprocess events fires from independent emitters,
+        // so error/close/start can race. The first one to write the response
+        // owns it; everything else must early-return.
+        let responded = false;
+        const respond = (fn) => {
+            if (responded || res.headersSent) {
+                responded = true;
+                return;
+            }
+            responded = true;
+            fn();
+        };
         subprocess.on("result", (result) => {
             finalResult = result;
         });
         subprocess.on("error", (error) => {
             console.error("[NonStreaming] Error:", error.message);
-            res.status(500).json({
-                error: { message: error.message, type: "server_error", code: null },
+            respond(() => {
+                res.status(500).json({
+                    error: { message: error.message, type: "server_error", code: null },
+                });
             });
             resolve();
         });
         subprocess.on("close", (code) => {
-            if (finalResult) {
-                const resultText = finalResult.result ?? "";
-                // Detect auth errors
-                if (isAuthError(resultText)) {
-                    console.error("[NonStreaming] Auth error detected in CLI output");
-                    res.status(503).json({
-                        error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
-                    });
-                    resolve();
-                    return;
+            respond(() => {
+                if (finalResult) {
+                    const resultText = finalResult.result ?? "";
+                    // Detect auth errors
+                    if (isAuthError(resultText)) {
+                        console.error("[NonStreaming] Auth error detected in CLI output");
+                        res.status(503).json({
+                            error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
+                        });
+                        return;
+                    }
+                    // Strip any [User]/[Human] bleed from the final result text
+                    finalResult = {
+                        ...finalResult,
+                        result: stripAssistantBleed(resultText),
+                    };
+                    res.json(cliResultToOpenai(finalResult, requestId));
                 }
-                // Strip any [User]/[Human] bleed from the final result text
-                finalResult = {
-                    ...finalResult,
-                    result: stripAssistantBleed(resultText),
-                };
-                res.json(cliResultToOpenai(finalResult, requestId));
-            }
-            else if (!res.headersSent) {
-                res.status(500).json({
-                    error: {
-                        message: `Claude CLI exited with code ${code} without response`,
-                        type: "server_error",
-                        code: null,
-                    },
-                });
-            }
+                else {
+                    res.status(500).json({
+                        error: {
+                            message: `Claude CLI exited with code ${code} without response`,
+                            type: "server_error",
+                            code: null,
+                        },
+                    });
+                }
+            });
             resolve();
         });
         // Start the subprocess with session-aware options
         subprocess.start(cliInput.prompt, subOpts).catch((error) => {
-            res.status(500).json({
-                error: { message: error.message, type: "server_error", code: null },
+            respond(() => {
+                res.status(500).json({
+                    error: { message: error.message, type: "server_error", code: null },
+                });
             });
             resolve();
         });
