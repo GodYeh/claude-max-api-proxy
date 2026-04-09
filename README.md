@@ -26,11 +26,12 @@ No third-party servers. Everything runs locally. Requests go through Anthropic's
 
 - **OpenAI-compatible API** — Drop-in replacement for any client that supports `POST /v1/chat/completions`
 - **Streaming & non-streaming** — Full SSE streaming support with direct delta forwarding
-- **Session persistence** — Conversations maintain context across messages via CLI session resume
+- **Stateless per-request** — Each call spawns a fresh CLI subprocess; conversation history is supplied by the client on every turn (the proxy itself does not retain session state). The session manager that used to live in `src/session/` was removed in v1.3.x.
 - **No turn limits** — The CLI runs as many tool-call rounds as needed for complex tasks
-- **Activity timeout** — 10-minute inactivity watchdog catches stuck processes while letting long tasks complete
-- **Telegram progress** — Real-time progress updates showing which tools are running (optional)
-- **No native dependencies** — Pure JS, uses `child_process.spawn()` with piped stdio and `--output-format stream-json`
+- **Activity timeout** — Configurable inactivity watchdog (`CLAUDE_PROXY_ACTIVITY_TIMEOUT_MS`, default 10 minutes) catches stuck processes while letting long tasks complete; both stdout and stderr count as activity
+- **Concurrency cap** — `CLAUDE_PROXY_MAX_CONCURRENT` (default 4) bounds in-flight requests so a burst cannot fork unbounded CLI subprocesses
+- **Prompt budget** — `CLAUDE_PROXY_PROMPT_BUDGET_BYTES` (default 100 KiB) drops the oldest history when long conversations exceed the budget
+- **No native dependencies** — Pure JS, uses `child_process.spawn()` with piped stdio and `--output-format stream-json`. Prompt and system instructions are piped via stdin to avoid Linux ARG_MAX (E2BIG) on long histories.
 
 ## Quick Start
 
@@ -84,8 +85,12 @@ npm run start    # starts the server
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_NOTIFY_ID` | No | Telegram user ID for timeout notifications |
 | `DEBUG` | No | Set to any value to enable request logging |
+| `CLAUDE_PROXY_MAX_CONCURRENT` | No | Max concurrent chat-completions requests (default 4). Excess requests get a 429 with Retry-After. |
+| `CLAUDE_PROXY_ACTIVITY_TIMEOUT_MS` | No | Inactivity watchdog timeout in ms (default 600000 = 10 min). Resets on stdout *or* stderr from the CLI. |
+| `CLAUDE_PROXY_PROMPT_BUDGET_BYTES` | No | Soft cap on rendered prompt size in UTF-8 bytes (default 100000). Oldest messages are dropped when exceeded. |
+| `OPENCLAW_GATEWAY_TOKEN` | No | OpenClaw gateway auth token. Falls back to `~/.openclaw/openclaw.json` if unset. |
+| `OPENCLAW_GATEWAY_URL` | No | OpenClaw gateway base URL (default `http://localhost:18789`). |
 
 ### Available Models
 
@@ -173,20 +178,21 @@ When used with [OpenClaw](https://openclaw.dev), this proxy supports all native 
 ```
 src/
 ├── adapter/
-│   ├── openai-to-cli.ts    # OpenAI request → CLI prompt + system prompt
-│   └── cli-to-openai.ts    # CLI JSON stream → OpenAI response format
+│   ├── openai-to-cli.ts    # OpenAI request → CLI prompt + inlined system instructions
+│   └── cli-to-openai.ts    # CLI JSON stream → OpenAI response format (incl. <tool_call> parsing)
 ├── subprocess/
-│   └── manager.ts           # CLI subprocess lifecycle & activity timeout
-├── session/
-│   └── manager.ts           # Conversation → CLI session mapping
+│   └── manager.ts          # CLI subprocess lifecycle, activity watchdog, env scrubbing
 ├── server/
-│   ├── routes.ts             # SSE streaming, progress notifications
-│   ├── index.ts              # Express server setup
-│   └── standalone.ts         # Entry point
-└── types/
-    ├── openai.ts             # OpenAI API type definitions
-    └── claude-cli.ts         # CLI stream-json event types
+│   ├── routes.ts           # /v1/chat/completions: SSE streaming, bleed/auth-probe/concurrency
+│   ├── index.ts            # Express server setup, CORS, error middleware
+│   └── standalone.ts       # `claude-max-api` CLI entry point
+├── types/
+│   ├── openai.ts           # OpenAI API type definitions
+│   └── claude-cli.ts       # CLI stream-json event types
+└── index.ts                # OpenClaw plugin registration
 ```
+
+There is no `src/session/` any more — see the **Stateless per-request** note in *Key Features*.
 
 ## Security
 
