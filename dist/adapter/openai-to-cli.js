@@ -434,71 +434,135 @@ export function extractSystemPrompt(messages, tools) {
  *   tool role messages (tool results) are rendered as [Tool Result:] blocks.
  *   When false, both are skipped (CLI handles tools internally).
  */
+/**
+ * Default soft cap on the rendered prompt size, in UTF-8 bytes. The proxy
+ * pipes the prompt via stdin so we are not bound by ARG_MAX (~128 KiB) any
+ * more, but very long histories still cost input tokens linearly *and*
+ * compound across every request because the gateway resends the full
+ * history each turn. Cap conservatively and let the user override.
+ */
+const DEFAULT_PROMPT_BUDGET_BYTES = 100_000;
+const PROMPT_BUDGET_BYTES = (() => {
+    const raw = process.env.CLAUDE_PROXY_PROMPT_BUDGET_BYTES;
+    if (!raw)
+        return DEFAULT_PROMPT_BUDGET_BYTES;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PROMPT_BUDGET_BYTES;
+})();
+const TRUNCATION_NOTE = "[earlier messages truncated due to length]";
+/**
+ * Render a single non-system message into its prompt-block string, or
+ * return null if the message has nothing to contribute (NO_REPLY filler,
+ * empty assistant tool_calls, ignored tool results, etc.).
+ */
+function renderMessage(msg, hasExternalTools) {
+    const text = extractText(msg.content);
+    switch (msg.role) {
+        case "user":
+            return `[User]\n${text}`;
+        case "assistant": {
+            // Skip NO_REPLY responses — OpenClaw silent tokens, not real content
+            if (!text || text.trim() === "NO_REPLY") {
+                if (hasExternalTools && msg.tool_calls && msg.tool_calls.length > 0) {
+                    // fall through to tool-call rendering below
+                }
+                else {
+                    return null;
+                }
+            }
+            if (hasExternalTools && msg.tool_calls && msg.tool_calls.length > 0) {
+                // Render prior tool calls as text markers so the model understands
+                // what it previously requested (multi-turn tool conversation)
+                const markers = msg.tool_calls
+                    .map((tc) => {
+                    const args = typeof tc.function.arguments === "string"
+                        ? tc.function.arguments
+                        : JSON.stringify(tc.function.arguments);
+                    let argsObj;
+                    try {
+                        argsObj = JSON.parse(args);
+                    }
+                    catch {
+                        argsObj = args;
+                    }
+                    return `<tool_call>${JSON.stringify({
+                        id: tc.id,
+                        name: tc.function.name,
+                        arguments: argsObj,
+                    })}</tool_call>`;
+                })
+                    .join("\n");
+                return `[Assistant]\n${markers}`;
+            }
+            // Skip assistant messages that are purely tool_calls with no text
+            if (msg.tool_calls && !text)
+                return null;
+            // Clean XML tool patterns to prevent CLI from mimicking them
+            const cleaned = cleanAssistantContent(text);
+            return cleaned ? `[Assistant]\n${cleaned}` : null;
+        }
+        case "tool": {
+            if (!hasExternalTools)
+                return null;
+            const label = msg.tool_call_id
+                ? `Tool Result: ${msg.tool_call_id}${msg.name ? ` (${msg.name})` : ""}`
+                : `Tool Result`;
+            return `[${label}]\n${text}`;
+        }
+        default:
+            return text || null;
+    }
+}
+/**
+ * Convert OpenAI messages array to a single prompt string for Claude CLI.
+ *
+ * Claude Code CLI in --print mode expects a single prompt, not a conversation.
+ * System messages are extracted separately (see extractSystemPrompt). XML tool
+ * patterns in assistant messages are cleaned by cleanAssistantContent() to
+ * prevent the model from mimicking XML format instead of using native tools.
+ * NO_REPLY assistant messages are filtered out (OpenClaw silent reply tokens).
+ *
+ * If the rendered prompt exceeds PROMPT_BUDGET_BYTES, the oldest messages
+ * are dropped (the most recent message is always retained) and a truncation
+ * marker is prepended.
+ *
+ * @param hasExternalTools - When true, assistant messages with tool_calls are
+ *   rendered as <tool_call> markers (for multi-turn tool conversations), and
+ *   tool role messages (tool results) are rendered as [Tool Result:] blocks.
+ *   When false, both are skipped (CLI handles tools internally).
+ */
 export function messagesToPrompt(messages, hasExternalTools = false) {
     const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
     const parts = [];
     for (const msg of nonSystemMessages) {
-        const text = extractText(msg.content);
-        switch (msg.role) {
-            case "user":
-                parts.push(`[User]\n${text}`);
-                break;
-            case "assistant": {
-                // Skip NO_REPLY responses — OpenClaw silent tokens, not real content
-                if (!text || text.trim() === "NO_REPLY")
-                    break;
-                if (hasExternalTools && msg.tool_calls && msg.tool_calls.length > 0) {
-                    // Render prior tool calls as text markers so the model understands
-                    // what it previously requested (multi-turn tool conversation)
-                    const markers = msg.tool_calls
-                        .map((tc) => {
-                        const args = typeof tc.function.arguments === "string"
-                            ? tc.function.arguments
-                            : JSON.stringify(tc.function.arguments);
-                        let argsObj;
-                        try {
-                            argsObj = JSON.parse(args);
-                        }
-                        catch {
-                            argsObj = args;
-                        }
-                        return `<tool_call>${JSON.stringify({
-                            id: tc.id,
-                            name: tc.function.name,
-                            arguments: argsObj,
-                        })}</tool_call>`;
-                    })
-                        .join("\n");
-                    parts.push(`[Assistant]\n${markers}`);
-                    break;
-                }
-                // Skip assistant messages that are purely tool_calls with no text
-                if (msg.tool_calls && !text)
-                    break;
-                // Clean XML tool patterns to prevent CLI from mimicking them
-                const cleaned = cleanAssistantContent(text);
-                if (cleaned) {
-                    parts.push(`[Assistant]\n${cleaned}`);
-                }
-                break;
-            }
-            case "tool": {
-                if (hasExternalTools) {
-                    // Render tool results so the model receives the outcome
-                    const label = msg.tool_call_id
-                        ? `Tool Result: ${msg.tool_call_id}${msg.name ? ` (${msg.name})` : ""}`
-                        : `Tool Result`;
-                    parts.push(`[${label}]\n${text}`);
-                }
-                // When not using external tools, skip (CLI has its own tool system)
-                break;
-            }
-            default:
-                parts.push(text);
-                break;
-        }
+        const part = renderMessage(msg, hasExternalTools);
+        if (part)
+            parts.push(part);
     }
-    return parts.join("\n\n").trim();
+    if (parts.length === 0)
+        return "";
+    const SEPARATOR = "\n\n";
+    const sepBytes = Buffer.byteLength(SEPARATOR, "utf8");
+    const partBytes = parts.map((p) => Buffer.byteLength(p, "utf8"));
+    let totalBytes = partBytes.reduce((sum, b, i) => sum + b + (i > 0 ? sepBytes : 0), 0);
+    if (totalBytes <= PROMPT_BUDGET_BYTES) {
+        return parts.join(SEPARATOR).trim();
+    }
+    // Over budget — drop the oldest parts one at a time, but always keep
+    // the most recent message (that is the actual user turn the model
+    // needs to answer). Surface the truncation in the prompt itself so the
+    // model knows context was clipped.
+    const truncationBytes = Buffer.byteLength(TRUNCATION_NOTE, "utf8") + sepBytes;
+    let dropFrom = 0;
+    while (dropFrom < parts.length - 1 && totalBytes + truncationBytes > PROMPT_BUDGET_BYTES) {
+        totalBytes -= partBytes[dropFrom] + sepBytes;
+        dropFrom += 1;
+    }
+    if (dropFrom > 0) {
+        console.error(`[messagesToPrompt] Truncated ${dropFrom} oldest message(s) ` +
+            `to fit ${PROMPT_BUDGET_BYTES}-byte budget`);
+    }
+    return [TRUNCATION_NOTE, ...parts.slice(dropFrom)].join(SEPARATOR).trim();
 }
 // ─── Stop-sequence bleed stripping ────────────────────────────────
 /**
