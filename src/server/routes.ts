@@ -133,6 +133,15 @@ async function handleStreamingResponse(
         const BLEED_SENTINELS = ["\n[User]", "\n[Human]", "\nHuman:"];
         const MAX_SENTINEL_LEN = Math.max(...BLEED_SENTINELS.map((s) => s.length));
 
+        // ── Auth-error probe state ─────────────────────────────────
+        // Hold back the first AUTH_PROBE_BYTES of streamed text so we can
+        // detect "not logged in" before any of it is forwarded to the client.
+        // Once the buffer is large enough — or the stream ends — we either
+        // emit an auth error or flush the buffer through the normal pipeline.
+        const AUTH_PROBE_BYTES = 1024;
+        let authProbe = "";
+        let authProbeCleared = false;
+
         /**
          * Write a delta chunk to the SSE stream.
          */
@@ -207,6 +216,71 @@ async function handleStreamingResponse(
             const safe = stripAssistantBleed(tail);
             if (safe) writeDelta(safe);
             tail = "";
+        }
+
+        /**
+         * Emit a structured auth error and tear down the stream.
+         * Used by both the early probe (in delta handler) and the late
+         * fallback (in result handler) so the wire format stays identical.
+         */
+        function emitAuthError(): void {
+            console.error("[Stream] Auth error detected — aborting stream");
+            if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({
+                    error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
+                })}\n\n`);
+                res.write("data: [DONE]\n\n");
+                res.end();
+            }
+            isComplete = true;
+            subprocess.kill();
+            resolve();
+        }
+
+        /**
+         * Buffer the first AUTH_PROBE_BYTES of streamed text and only forward
+         * it once we are confident it is not an auth error. This prevents
+         * "not logged in" content from leaking to the client before we can
+         * replace it with a structured auth_error.
+         *
+         * Returns true if the stream should keep running, false if we have
+         * already terminated it (auth error confirmed).
+         */
+        function ingestDelta(text: string): boolean {
+            if (authProbeCleared) {
+                processDelta(text);
+                return true;
+            }
+            authProbe += text;
+            if (isAuthError(authProbe)) {
+                emitAuthError();
+                return false;
+            }
+            if (authProbe.length >= AUTH_PROBE_BYTES) {
+                authProbeCleared = true;
+                const drained = authProbe;
+                authProbe = "";
+                processDelta(drained);
+            }
+            return true;
+        }
+
+        /**
+         * Drain the auth probe buffer at end-of-stream. Returns false if an
+         * auth error was detected (caller should bail out without writing
+         * the normal completion chunks).
+         */
+        function drainAuthProbe(): boolean {
+            if (authProbeCleared || !authProbe) return true;
+            if (isAuthError(authProbe)) {
+                emitAuthError();
+                return false;
+            }
+            authProbeCleared = true;
+            const drained = authProbe;
+            authProbe = "";
+            processDelta(drained);
+            return true;
         }
         // ──────────────────────────────────────────────────────────
 
@@ -290,30 +364,21 @@ async function handleStreamingResponse(
                 resolve();
             });
         } else {
-            // ── Normal mode: stream deltas through bleed detection ────────────
+            // ── Normal mode: stream deltas through auth-probe + bleed pipeline ─
             subprocess.on("content_delta", (event: any) => {
                 const text = event.event.delta?.text || "";
                 if (!text) return;
                 allContent += text;
-                processDelta(text);
+                ingestDelta(text);
             });
 
             subprocess.on("result", (_result: any) => {
                 isComplete = true;
 
-                // Detect auth errors before forwarding
-                if (isAuthError(allContent)) {
-                    console.error("[Stream] Auth error detected in CLI output");
-                    if (!res.writableEnded) {
-                        res.write(`data: ${JSON.stringify({
-                            error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
-                        })}\n\n`);
-                        res.write("data: [DONE]\n\n");
-                        res.end();
-                    }
-                    resolve();
-                    return;
-                }
+                // Drain any held-back auth probe before finishing.
+                // drainAuthProbe() returns false if it terminated the stream
+                // with an auth error — in which case we have nothing more to do.
+                if (!drainAuthProbe()) return;
 
                 // Flush any buffered tail through bleed detection before finishing
                 flushTail();
