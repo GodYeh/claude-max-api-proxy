@@ -113,9 +113,12 @@ export class ClaudeSubprocess extends EventEmitter {
             : prompt;
 
         // Build the env we'll hand to spawn separately so we can measure it.
+        // Note: assigning `CLAUDECODE: undefined` in an object spread does NOT
+        // remove the key — Node forwards undefined values to the child as the
+        // literal string "undefined". To actually unset CLAUDECODE we have to
+        // delete the key after the spread.
         const childEnv: NodeJS.ProcessEnv = {
             ...process.env,
-            CLAUDECODE: undefined,
             // Ensure oc-tool is findable and can reach the gateway
             PATH: [
                 path.join(process.env.HOME || "/tmp", ".openclaw", "bin"),
@@ -124,6 +127,7 @@ export class ClaudeSubprocess extends EventEmitter {
             OPENCLAW_GATEWAY_TOKEN: resolveGatewayToken() ?? undefined,
             OPENCLAW_GATEWAY_URL: process.env.OPENCLAW_GATEWAY_URL ?? "http://localhost:18789",
         };
+        delete childEnv.CLAUDECODE;
 
         // Diagnostics: log argv + envp sizes so we can spot ARG_MAX (E2BIG) blowups.
         // Linux ARG_MAX is typically 128 KiB and counts argv + envp combined.
