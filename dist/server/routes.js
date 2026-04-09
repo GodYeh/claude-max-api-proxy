@@ -311,9 +311,9 @@ async function handleStreamingResponse(res, subprocess, cliInput, requestId, sub
         subprocess.on("message", (msg) => {
             if (msg.type !== "stream_event")
                 return;
-            const eventType = msg.event?.type;
-            if (eventType === "content_block_start") {
-                const block = msg.event.content_block;
+            const event = msg.event;
+            if (event.type === "content_block_start") {
+                const block = event.content_block;
                 if (block?.type === "tool_use" && block.name) {
                     console.error(`[Stream] Tool call: ${block.name}`);
                 }

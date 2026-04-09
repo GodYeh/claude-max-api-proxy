@@ -11,6 +11,12 @@ import type { SubprocessOptions } from "../subprocess/manager.js";
 import { openaiToCli, stripAssistantBleed } from "../adapter/openai-to-cli.js";
 import type { CliInput } from "../adapter/openai-to-cli.js";
 import { cliResultToOpenai, createDoneChunk, parseToolCalls, createToolCallChunks } from "../adapter/cli-to-openai.js";
+import type {
+    ClaudeCliAssistant,
+    ClaudeCliMessage,
+    ClaudeCliResult,
+    ClaudeCliStreamEvent,
+} from "../types/claude-cli.js";
 
 
 // ── Auth Error Detection ────────────────────────────────────────────
@@ -345,11 +351,11 @@ async function handleStreamingResponse(
         });
 
         // Log tool calls
-        subprocess.on("message", (msg: any) => {
+        subprocess.on("message", (msg: ClaudeCliMessage) => {
             if (msg.type !== "stream_event") return;
-            const eventType = msg.event?.type;
-            if (eventType === "content_block_start") {
-                const block = msg.event.content_block;
+            const event = msg.event;
+            if (event.type === "content_block_start") {
+                const block = event.content_block;
                 if (block?.type === "tool_use" && block.name) {
                     console.error(`[Stream] Tool call: ${block.name}`);
                 }
@@ -357,7 +363,7 @@ async function handleStreamingResponse(
         });
 
         // Track model name from assistant messages
-        subprocess.on("assistant", (message: any) => {
+        subprocess.on("assistant", (message: ClaudeCliAssistant) => {
             lastModel = message.message.model;
         });
 
@@ -367,12 +373,12 @@ async function handleStreamingResponse(
             // multiple delta chunks. Buffer everything and emit synthesized chunks.
             let toolBuffer = "";
 
-            subprocess.on("content_delta", (event: any) => {
+            subprocess.on("content_delta", (event: ClaudeCliStreamEvent) => {
                 const text = event.event.delta?.text || "";
                 toolBuffer += text;
             });
 
-            subprocess.on("result", (_result: any) => {
+            subprocess.on("result", (_result: ClaudeCliResult) => {
                 isComplete = true;
 
                 // Detect auth errors before forwarding
@@ -418,13 +424,13 @@ async function handleStreamingResponse(
             });
         } else {
             // ── Normal mode: stream deltas through auth-probe + bleed pipeline ─
-            subprocess.on("content_delta", (event: any) => {
+            subprocess.on("content_delta", (event: ClaudeCliStreamEvent) => {
                 const text = event.event.delta?.text || "";
                 if (!text) return;
                 ingestDelta(text);
             });
 
-            subprocess.on("result", (_result: any) => {
+            subprocess.on("result", (_result: ClaudeCliResult) => {
                 isComplete = true;
 
                 // Drain any held-back auth probe before finishing.
@@ -493,7 +499,7 @@ async function handleNonStreamingResponse(
     subOpts: SubprocessOptions
 ): Promise<void> {
     return new Promise<void>((resolve) => {
-        let finalResult: any = null;
+        let finalResult: ClaudeCliResult | null = null;
         // Each call to subprocess events fires from independent emitters,
         // so error/close/start can race. The first one to write the response
         // owns it; everything else must early-return.
@@ -507,7 +513,7 @@ async function handleNonStreamingResponse(
             fn();
         };
 
-        subprocess.on("result", (result) => {
+        subprocess.on("result", (result: ClaudeCliResult) => {
             finalResult = result;
         });
 
