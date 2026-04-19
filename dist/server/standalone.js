@@ -19,6 +19,7 @@
  * pidfile once the listener is up.
  */
 import fs from "node:fs";
+import http from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startServer, stopServer } from "./index.js";
@@ -31,6 +32,7 @@ const SUBCOMMANDS = new Set([
     "restart",
     "status",
     "logs",
+    "mon",
     "help",
     "--help",
     "-h",
@@ -54,6 +56,7 @@ function printHelp() {
   claude-max-api restart [port]   Stop then start in the background
   claude-max-api status           Show whether the daemon is running
   claude-max-api logs [-f]        Print (or follow) the daemon log file
+  claude-max-api mon [-n NUM]     Monitor recent requests (default 20, -1 = all)
   claude-max-api help             Show this help
 
 State files:
@@ -192,6 +195,94 @@ function cmdLogs(follow) {
         process.stdout.write(fs.readFileSync(LOG_FILE));
     }
 }
+function httpGet(url) {
+    return new Promise((resolve, reject) => {
+        http.get(url, (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk.toString(); });
+            res.on("end", () => resolve(data));
+        }).on("error", reject);
+    });
+}
+function formatBytes(bytes) {
+    if (bytes < 1024)
+        return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024)
+        return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB`;
+}
+function formatElapsed(ms) {
+    if (ms < 1000)
+        return `${ms}ms`;
+    const s = ms / 1000;
+    if (s < 60)
+        return `${s.toFixed(1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = s - m * 60;
+    return `${m}m${rem.toFixed(0)}s`;
+}
+function renderTable(data, port) {
+    const lines = [];
+    lines.push(`Claude Max API \u2014 Request Monitor (port ${port})`);
+    lines.push("\u2501".repeat(76));
+    lines.push(` ${"Request ID".padEnd(26)} ${"Input".padStart(9)} ${"Output".padStart(9)} ${"Status".padEnd(14)} ${"Elapsed".padStart(8)}`);
+    lines.push("\u2500".repeat(76));
+    if (data.requests.length === 0) {
+        lines.push("  (no requests yet)");
+    }
+    else {
+        for (const r of data.requests) {
+            const id = r.id.length > 24 ? r.id.slice(0, 22) + ".." : r.id.padEnd(24);
+            const input = formatBytes(r.inputLength).padStart(9);
+            const output = formatBytes(r.outputLength).padStart(9);
+            const status = r.status.padEnd(14);
+            const elapsed = formatElapsed(r.elapsedMs).padStart(8);
+            lines.push(` ${id}  ${input} ${output}  ${status} ${elapsed}`);
+        }
+    }
+    lines.push("\u2501".repeat(76));
+    const ts = data.timestamp.replace("T", " ").replace(/\.\d+Z$/, "");
+    lines.push(` Active: ${data.active} / ${data.maxConcurrent}    Total: ${data.requests.length}    Updated: ${ts}`);
+    return lines.join("\n");
+}
+async function cmdMon(port, n) {
+    const url = `http://127.0.0.1:${port}/v1/requests?n=${n}`;
+    // Verify connectivity once before entering the loop.
+    try {
+        await httpGet(`http://127.0.0.1:${port}/health`);
+    }
+    catch {
+        console.error(`Cannot reach server at http://127.0.0.1:${port}. Is it running?`);
+        process.exit(1);
+    }
+    let running = true;
+    const shutdown = () => {
+        running = false;
+        // Show cursor again and move below the table.
+        process.stdout.write("\x1b[?25h");
+        process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+    // Hide cursor for cleaner refreshes.
+    process.stdout.write("\x1b[?25l");
+    while (running) {
+        try {
+            const raw = await httpGet(url);
+            const data = JSON.parse(raw);
+            // Clear screen and move cursor to top-left.
+            process.stdout.write("\x1b[2J\x1b[H");
+            process.stdout.write(renderTable(data, port) + "\n");
+        }
+        catch {
+            process.stdout.write("\x1b[2J\x1b[H");
+            process.stdout.write(`Connection lost to http://127.0.0.1:${port} \u2014 retrying...\n`);
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+    }
+}
 async function main() {
     const arg0 = process.argv[2];
     // Internal: invoked by daemonize() in the background child.
@@ -217,6 +308,24 @@ async function main() {
             case "logs": {
                 const follow = process.argv[3] === "-f" || process.argv[3] === "--follow";
                 cmdLogs(follow);
+                return;
+            }
+            case "mon": {
+                // Parse -n NUMBER from remaining args
+                let monN = 20;
+                const monArgs = process.argv.slice(3);
+                for (let i = 0; i < monArgs.length; i++) {
+                    if (monArgs[i] === "-n" && i + 1 < monArgs.length) {
+                        monN = parseInt(monArgs[i + 1], 10);
+                        if (isNaN(monN))
+                            monN = 20;
+                        break;
+                    }
+                }
+                // Determine port from running daemon or fall back to default.
+                const daemon = getRunningDaemon();
+                const monPort = daemon?.port ?? DEFAULT_PORT;
+                await cmdMon(monPort, monN);
                 return;
             }
             case "help":

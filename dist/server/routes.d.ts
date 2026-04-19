@@ -19,4 +19,8 @@ export declare function handleModels(_req: Request, res: Response): void;
  * Handle GET /health — Health check endpoint
  */
 export declare function handleHealth(_req: Request, res: Response): void;
+/**
+ * Handle GET /v1/requests — Returns recent request status for the monitor
+ */
+export declare function handleRequests(req: Request, res: Response): void;
 //# sourceMappingURL=routes.d.ts.map

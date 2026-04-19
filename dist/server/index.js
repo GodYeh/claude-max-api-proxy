@@ -5,7 +5,7 @@
  */
 import express from "express";
 import { createServer } from "http";
-import { handleChatCompletions, handleModels, handleHealth } from "./routes.js";
+import { handleChatCompletions, handleModels, handleHealth, handleRequests } from "./routes.js";
 let serverInstance = null;
 /**
  * Create and configure the Express app
@@ -48,6 +48,7 @@ function createApp() {
     // Routes
     app.get("/health", handleHealth);
     app.get("/v1/models", handleModels);
+    app.get("/v1/requests", handleRequests);
     app.post("/v1/chat/completions", handleChatCompletions);
     // 404 handler
     app.use((_req, res) => {

@@ -11,6 +11,7 @@ import type { SubprocessOptions } from "../subprocess/manager.js";
 import { openaiToCli, stripAssistantBleed } from "../adapter/openai-to-cli.js";
 import type { CliInput } from "../adapter/openai-to-cli.js";
 import { cliResultToOpenai, createDoneChunk, parseToolCalls, createToolCallChunks } from "../adapter/cli-to-openai.js";
+import { trackRequest, updateRequest, addOutputBytes, getRequests, getActiveCount } from "./request-tracker.js";
 import type {
     ClaudeCliAssistant,
     ClaudeCliMessage,
@@ -72,6 +73,8 @@ export async function handleChatCompletions(req: Request, res: Response): Promis
     }
 
     activeRequests += 1;
+    const inputLength = Buffer.byteLength(JSON.stringify(body.messages), "utf8");
+    trackRequest(requestId, inputLength);
     try {
         // Validate request
         if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -112,6 +115,7 @@ export async function handleChatCompletions(req: Request, res: Response): Promis
             await handleNonStreamingResponse(res, subprocess, cliInput, requestId, subOpts);
         }
     } catch (error) {
+        updateRequest(requestId, { status: "error" });
         const message = error instanceof Error ? error.message : "Unknown error";
         const stack = error instanceof Error ? error.stack : "";
         console.error("[handleChatCompletions] Error:", message);
@@ -376,14 +380,17 @@ async function handleStreamingResponse(
             subprocess.on("content_delta", (event: ClaudeCliStreamEvent) => {
                 const text = event.event.delta?.text || "";
                 toolBuffer += text;
+                addOutputBytes(requestId, Buffer.byteLength(text, "utf8"));
             });
 
             subprocess.on("result", (_result: ClaudeCliResult) => {
                 isComplete = true;
+                updateRequest(requestId, { status: "completed" });
 
                 // Detect auth errors before forwarding
                 if (isAuthError(toolBuffer)) {
                     console.error("[Stream] Auth error detected in CLI output");
+                    updateRequest(requestId, { status: "error" });
                     if (!res.writableEnded) {
                         res.write(`data: ${JSON.stringify({
                             error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
@@ -427,16 +434,21 @@ async function handleStreamingResponse(
             subprocess.on("content_delta", (event: ClaudeCliStreamEvent) => {
                 const text = event.event.delta?.text || "";
                 if (!text) return;
+                addOutputBytes(requestId, Buffer.byteLength(text, "utf8"));
                 ingestDelta(text);
             });
 
             subprocess.on("result", (_result: ClaudeCliResult) => {
                 isComplete = true;
+                updateRequest(requestId, { status: "completed" });
 
                 // Drain any held-back auth probe before finishing.
                 // drainAuthProbe() returns false if it terminated the stream
                 // with an auth error — in which case we have nothing more to do.
-                if (!drainAuthProbe()) return;
+                if (!drainAuthProbe()) {
+                    updateRequest(requestId, { status: "error" });
+                    return;
+                }
 
                 // Flush any buffered tail through bleed detection before finishing
                 flushTail();
@@ -451,6 +463,7 @@ async function handleStreamingResponse(
         }
 
         subprocess.on("error", (error: Error) => {
+            updateRequest(requestId, { status: "error" });
             console.error("[Streaming] Error:", error.message);
             if (!res.writableEnded) {
                 res.write(`data: ${JSON.stringify({
@@ -462,6 +475,9 @@ async function handleStreamingResponse(
         });
 
         subprocess.on("close", (code: number | null) => {
+            if (code !== 0 && !isComplete) {
+                updateRequest(requestId, { status: "error" });
+            }
             // Subprocess exited - ensure response is closed
             if (!res.writableEnded) {
                 if (code !== 0 && !isComplete) {
@@ -518,6 +534,7 @@ async function handleNonStreamingResponse(
         });
 
         subprocess.on("error", (error) => {
+            updateRequest(requestId, { status: "error" });
             console.error("[NonStreaming] Error:", error.message);
             respond(() => {
                 res.status(500).json({
@@ -534,6 +551,7 @@ async function handleNonStreamingResponse(
                     // Detect auth errors
                     if (isAuthError(resultText)) {
                         console.error("[NonStreaming] Auth error detected in CLI output");
+                        updateRequest(requestId, { status: "error" });
                         res.status(503).json({
                             error: { message: "Claude CLI is not authenticated. Run: claude login", type: "auth_error", code: "not_authenticated" },
                         });
@@ -544,8 +562,11 @@ async function handleNonStreamingResponse(
                         ...finalResult,
                         result: stripAssistantBleed(resultText),
                     };
+                    const outputLength = Buffer.byteLength(finalResult.result ?? "", "utf8");
+                    updateRequest(requestId, { status: "completed", outputLength });
                     res.json(cliResultToOpenai(finalResult, requestId));
                 } else {
+                    updateRequest(requestId, { status: "error" });
                     res.status(500).json({
                         error: {
                             message: `Claude CLI exited with code ${code} without response`,
@@ -592,6 +613,21 @@ export function handleHealth(_req: Request, res: Response): void {
     res.json({
         status: "ok",
         provider: "claude-code-cli",
+        timestamp: new Date().toISOString(),
+    });
+}
+
+/**
+ * Handle GET /v1/requests — Returns recent request status for the monitor
+ */
+export function handleRequests(req: Request, res: Response): void {
+    const rawN = req.query.n;
+    const n = typeof rawN === "string" ? parseInt(rawN, 10) : 20;
+    const limit = n === -1 ? undefined : (Number.isFinite(n) && n > 0 ? n : 20);
+    res.json({
+        requests: getRequests(limit),
+        active: getActiveCount(),
+        maxConcurrent: MAX_CONCURRENT,
         timestamp: new Date().toISOString(),
     });
 }
